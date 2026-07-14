@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: zerkalo
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: TRUST_WALLET
+        sync: false
+      - key: GIS_API_KEY
+        sync: false
