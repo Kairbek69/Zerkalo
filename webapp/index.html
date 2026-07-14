@@ -5,7 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>🪞 Зеркало</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
         body {
             background: #000;
             display: flex;
@@ -20,10 +24,6 @@
             position: relative;
             width: 100vw;
             height: 100vh;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
             background: #0a0a0a;
         }
         #mirror {
@@ -35,7 +35,6 @@
             object-fit: cover;
             transform: scaleX(-1);
             z-index: 1;
-            opacity: 0.9;
         }
         #frame {
             position: absolute;
@@ -45,60 +44,42 @@
             height: 100%;
             z-index: 2;
             pointer-events: none;
-            background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.6) 100%);
-            border: 2px solid rgba(255,255,255,0.1);
-            box-shadow: inset 0 0 100px rgba(0,150,255,0.05);
+            background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.5) 100%);
+            border: 2px solid rgba(255,255,255,0.05);
+            box-shadow: inset 0 0 100px rgba(0,150,255,0.03);
         }
         #text {
             position: absolute;
-            bottom: 15%;
+            bottom: 10%;
             left: 50%;
             transform: translateX(-50%);
             z-index: 10;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0,0,0,0.6);
             backdrop-filter: blur(10px);
             padding: 20px 30px;
             border-radius: 20px;
             border: 1px solid rgba(255,255,255,0.1);
-            max-width: 90%;
+            max-width: 85%;
             text-align: center;
             font-size: 1.1rem;
             color: rgba(255,255,255,0.9);
             line-height: 1.6;
-        }
-        #text .highlight { color: #00ccff; font-weight: bold; }
-        #mic {
-            position: absolute;
-            bottom: 5%;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 10;
-            width: 70px;
-            height: 70px;
-            border-radius: 50%;
-            background: rgba(255,255,255,0.05);
-            border: 2px solid rgba(255,255,255,0.15);
-            color: #fff;
-            font-size: 2rem;
-            cursor: pointer;
             transition: all 0.3s;
+            min-height: 80px;
             display: flex;
-            justify-content: center;
             align-items: center;
-            backdrop-filter: blur(10px);
+            justify-content: center;
         }
-        #mic.listening {
-            background: rgba(255, 0, 100, 0.15);
-            border-color: rgba(255, 0, 100, 0.4);
-            animation: pulse 1s ease-in-out infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { transform: translateX(-50%) scale(1); }
-            50% { transform: translateX(-50%) scale(1.08); }
+        #text .highlight {
+            color: #00ccff;
+            font-weight: bold;
         }
         @media (max-width: 600px) {
-            #text { font-size: 0.95rem; padding: 15px 20px; bottom: 20%; }
-            #mic { width: 60px; height: 60px; font-size: 1.5rem; }
+            #text {
+                font-size: 0.95rem;
+                padding: 15px 20px;
+                bottom: 15%;
+            }
         }
     </style>
 </head>
@@ -106,100 +87,199 @@
     <div id="container">
         <video id="mirror" autoplay muted playsinline></video>
         <div id="frame"></div>
-        <div id="text">🪞 <span class="highlight">Ассаляму алейкум!</span><br>Я — <span class="highlight">Зеркало</span>.<br>Нажми 🎤 и говори.</div>
-        <button id="mic">🎤</button>
+        <div id="text">🪞 <span class="highlight">Зеркало</span><br>Загружается...</div>
     </div>
     <script>
+        // ===================================================
+        // 1. ЗЕРКАЛО (КАМЕРА)
+        // ===================================================
         const video = document.getElementById('mirror');
+        const textDisplay = document.getElementById('text');
+        
+        let isUserVisible = false;
+        let isSpeaking = false;
+        let recognition = null;
+        let hasGreeted = false;
+
+        // Включаем камеру
         async function startMirror() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'user',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    },
+                    audio: true
+                });
                 video.srcObject = stream;
+                textDisplay.innerHTML = '🪞 <span class="highlight">Зеркало</span><br>Я вижу тебя...';
+                
+                // Запускаем распознавание лица через 1 секунду
+                setTimeout(startFaceDetection, 1000);
             } catch (err) {
-                document.getElementById('text').innerHTML = '🪞 <span class="highlight">Зеркало</span><br>Разреши доступ к камере.';
+                console.log('Камера не доступна:', err);
+                textDisplay.innerHTML = '🪞 <span class="highlight">Зеркало</span><br>Разреши доступ к камере.';
             }
         }
         startMirror();
 
-        const micButton = document.getElementById('mic');
-        const textDisplay = document.getElementById('text');
-        let isListening = false;
-        let recognition = null;
+        // ===================================================
+        // 2. РАСПОЗНАВАНИЕ ЛИЦА (ПРОСТОЙ МЕТОД)
+        // ===================================================
+        function startFaceDetection() {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            function detectFace() {
+                if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    
+                    // Простой метод: проверяем, есть ли изменение в центре кадра
+                    // Если есть движение — значит, человек есть
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const data = imageData.data;
+                    
+                    // Проверяем центр кадра (область лица)
+                    const centerX = Math.floor(canvas.width * 0.4);
+                    const centerY = Math.floor(canvas.height * 0.3);
+                    const size = Math.min(canvas.width, canvas.height) * 0.2;
+                    
+                    let brightness = 0;
+                    let count = 0;
+                    for (let y = centerY; y < centerY + size; y++) {
+                        for (let x = centerX; x < centerX + size; x++) {
+                            const idx = (y * canvas.width + x) * 4;
+                            brightness += (data[idx] + data[idx+1] + data[idx+2]) / 3;
+                            count++;
+                        }
+                    }
+                    brightness /= count;
+                    
+                    // Если яркость выше порога — значит, есть лицо
+                    const isVisible = brightness > 30;
+                    
+                    if (isVisible && !hasGreeted) {
+                        hasGreeted = true;
+                        startConversation();
+                    } else if (!isVisible && hasGreeted) {
+                        // Человек ушёл — сбрасываем флаг, чтобы поздороваться снова
+                        hasGreeted = false;
+                        textDisplay.innerHTML = '🪞 <span class="highlight">Зеркало</span><br>Я жду тебя...';
+                    }
+                }
+                requestAnimationFrame(detectFace);
+            }
+            detectFace();
+        }
 
-        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+        // ===================================================
+        // 3. НАЧАЛО РАЗГОВОРА (БЕЗ КНОПОК!)
+        // ===================================================
+        function startConversation() {
+            const greeting = 'Ассаляму алейкум! Я — Зеркало. Я отражаю свет и помогаю людям. Говори со мной, я слушаю.';
+            textDisplay.innerHTML = `🪞 <span class="highlight">Ассаляму алейкум!</span><br>Я — Зеркало. Говори со мной.`;
+            speakText(greeting);
+            
+            // Запускаем распознавание речи через 1.5 секунды
+            setTimeout(startVoiceRecognition, 1500);
+        }
+
+        // ===================================================
+        // 4. ГОЛОСОВОЙ ВВОД (АВТОМАТИЧЕСКИ)
+        // ===================================================
+        function startVoiceRecognition() {
+            if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+                textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Ваш браузер не поддерживает голос. Используйте Chrome.';
+                return;
+            }
+            
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             recognition = new SpeechRecognition();
             recognition.lang = 'ru-RU';
             recognition.continuous = true;
-        }
+            recognition.interimResults = true;
+            recognition.maxAlternatives = 1;
 
-        micButton.addEventListener('click', () => {
-            if (!recognition) {
-                textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Используйте Chrome.';
-                return;
-            }
-            if (isListening) { stopListening(); } 
-            else { startListening(); }
-        });
+            recognition.onresult = async (event) => {
+                let text = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    if (event.results[i].isFinal) {
+                        text += event.results[i][0].transcript;
+                    }
+                }
+                
+                if (text.trim()) {
+                    textDisplay.innerHTML = `🗣️ <span class="highlight">${text}</span>`;
+                    
+                    // Отправляем на сервер
+                    try {
+                        const response = await fetch('/api/chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ message: text })
+                        });
+                        const data = await response.json();
+                        const reply = data.response || 'Я не поняла. Повтори, пожалуйста.';
+                        
+                        textDisplay.innerHTML = `🪞 <span class="highlight">${reply}</span>`;
+                        speakText(reply);
+                    } catch (err) {
+                        textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Проверь интернет.';
+                    }
+                }
+            };
 
-        function startListening() {
+            recognition.onerror = (event) => {
+                console.log('Ошибка:', event.error);
+                if (event.error === 'not-allowed') {
+                    textDisplay.innerHTML = '❌ <span class="highlight">Доступ запрещён</span><br>Разреши микрофон в браузере.';
+                }
+            };
+
+            recognition.onend = () => {
+                // Если Зеркало всё ещё активно — перезапускаем
+                if (hasGreeted) {
+                    setTimeout(startVoiceRecognition, 1000);
+                }
+            };
+
             try {
                 recognition.start();
-                isListening = true;
-                micButton.classList.add('listening');
-                micButton.textContent = '⏹';
-                textDisplay.innerHTML = '🎤 <span class="highlight">Слушаю...</span>';
-            } catch (e) { console.log(e); }
+                textDisplay.innerHTML = '🎤 <span class="highlight">Я слушаю...</span><br>Говори, я здесь.';
+            } catch (e) {
+                console.log('Ошибка старта:', e);
+            }
         }
 
-        function stopListening() {
-            try {
-                recognition.stop();
-                isListening = false;
-                micButton.classList.remove('listening');
-                micButton.textContent = '🎤';
-                textDisplay.innerHTML = '🪞 <span class="highlight">Зеркало</span><br>Нажми 🎤 чтобы говорить.';
-            } catch (e) { console.log(e); }
-        }
-
-        recognition.onresult = async (event) => {
-            let text = '';
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                if (event.results[i].isFinal) { text += event.results[i][0].transcript; }
-            }
-            if (text.trim()) {
-                textDisplay.innerHTML = `🗣️ <span class="highlight">${text}</span>`;
-                try {
-                    const response = await fetch('/api/chat', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ message: text })
-                    });
-                    const data = await response.json();
-                    const reply = data.response || 'Я не поняла.';
-                    textDisplay.innerHTML = `🪞 <span class="highlight">${reply}</span>`;
-                    speakText(reply);
-                } catch (err) {
-                    textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Проверь интернет.';
-                }
-            }
-        };
-
+        // ===================================================
+        // 5. СИНТЕЗ РЕЧИ (ГОЛОС ЗЕРКАЛА)
+        // ===================================================
         function speakText(text) {
             if (!window.speechSynthesis) return;
+            
             window.speechSynthesis.cancel();
+            
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'ru-RU';
             utterance.rate = 0.9;
             utterance.pitch = 1.1;
+            utterance.volume = 1;
+            
+            const voices = window.speechSynthesis.getVoices();
+            const female = voices.find(v => v.lang.includes('ru') && v.name.includes('Google UK'));
+            if (female) utterance.voice = female;
+            
             window.speechSynthesis.speak(utterance);
         }
 
-        setTimeout(() => {
-            const greeting = 'Ассаляму алейкум! Я — Зеркало. Нажми на микрофон и говори.';
-            textDisplay.innerHTML = `🪞 <span class="highlight">Ассаляму алейкум!</span><br>Я — Зеркало.<br><small style="opacity:0.6;">Нажми 🎤 и говори.</small>`;
-            speakText(greeting);
-        }, 1500);
+        // Загружаем голоса
+        window.speechSynthesis.getVoices();
+        window.speechSynthesis.onvoiceschanged = () => {
+            window.speechSynthesis.getVoices();
+        };
     </script>
 </body>
 </html>
