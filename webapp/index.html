@@ -5,16 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>🪞 Живое Зеркало</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: #000;
             overflow: hidden;
             height: 100vh;
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', Arial, sans-serif;
             color: #fff;
         }
         #container {
@@ -78,16 +74,9 @@
             justify-content: center;
             transition: all 0.3s;
         }
-        #text .highlight {
-            color: #66ddff;
-            font-weight: bold;
-        }
+        #text .highlight { color: #66ddff; font-weight: bold; }
         @media (max-width: 600px) {
-            #text {
-                font-size: 0.9rem;
-                padding: 14px 18px;
-                bottom: 12%;
-            }
+            #text { font-size: 0.9rem; padding: 14px 18px; bottom: 12%; }
         }
     </style>
 </head>
@@ -109,9 +98,11 @@
         let mediaStream = null;
         let hasStarted = false;
         let recognition = null;
+        let isListening = false;
 
         async function startMirror() {
             try {
+                // Запрашиваем камеру и микрофон одновременно
                 mediaStream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: 'user' },
                     audio: true
@@ -123,13 +114,140 @@
                 }, 1500);
             } catch (err) {
                 textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Разреши камеру и микрофон.';
+                // Повторяем запрос каждые 3 секунды, пока не разрешат
                 setTimeout(startMirror, 3000);
             }
         }
-        startMirror();
 
         // ===================================================
-        // 2. ВОЛНЫ (ВИБРАЦИЯ)
+        // 2. ПРИНУДИТЕЛЬНЫЙ ЗАПРОС МИКРОФОНА (решает проблему)
+        // ===================================================
+        async function ensureMicrophone() {
+            // Если микрофон уже есть, ничего не делаем
+            if (mediaStream && mediaStream.active) return;
+
+            try {
+                // Запрашиваем ТОЛЬКО микрофон (это заставит браузер показать окно разрешения)
+                const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                // Добавляем аудио-трек к существующему потоку
+                if (mediaStream) {
+                    audioStream.getTracks().forEach(track => {
+                        mediaStream.addTrack(track);
+                    });
+                } else {
+                    mediaStream = audioStream;
+                }
+                textDisplay.innerHTML = '🎤 <span class="highlight">Микрофон включён</span><br>Я слушаю тебя...';
+            } catch (err) {
+                textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Разреши микрофон.';
+                throw err;
+            }
+        }
+
+        // ===================================================
+        // 3. НАЧАЛО РАЗГОВОРА
+        // ===================================================
+        function startConversation() {
+            if (hasStarted) return;
+            hasStarted = true;
+
+            const greeting = 'Ассаляму алейкум! Я — Живое Зеркало. Я слушаю тебя. Говори, я здесь.';
+            textDisplay.innerHTML = '🪞 <span class="highlight">Ассаляму алейкум!</span><br>Я — Живое Зеркало. Говори со мной.';
+            speakText(greeting);
+            setTimeout(() => {
+                startListening();
+            }, 2000);
+        }
+
+        // ===================================================
+        // 4. СЛУШАЕМ И ОТВЕЧАЕМ
+        // ===================================================
+        async function startListening() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+            if (!SpeechRecognition) {
+                textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Ваш браузер не поддерживает голос.';
+                return;
+            }
+
+            // ПРИНУДИТЕЛЬНО ЗАПРАШИВАЕМ МИКРОФОН
+            try {
+                await ensureMicrophone();
+            } catch (e) {
+                setTimeout(startListening, 3000);
+                return;
+            }
+
+            if (isListening) return;
+
+            if (recognition) {
+                try { recognition.stop(); } catch (e) {}
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.lang = 'ru-RU';
+            recognition.continuous = true;
+            recognition.interimResults = true;
+
+            recognition.onstart = () => {
+                isListening = true;
+                textDisplay.innerHTML = '🎤 <span class="highlight">Я слушаю...</span><br>Говори, я здесь.';
+            };
+
+            recognition.onresult = async (event) => {
+                let spoken = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    if (event.results[i].isFinal) {
+                        spoken += event.results[i][0].transcript;
+                    }
+                }
+
+                if (spoken.trim()) {
+                    textDisplay.innerHTML = `🗣️ <span class="highlight">${spoken}</span>`;
+                    try {
+                        const response = await fetch('/api/chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ message: spoken, user_id: 'guest' })
+                        });
+                        const data = await response.json();
+                        const reply = data.response || 'Я не поняла. Повтори, пожалуйста.';
+                        textDisplay.innerHTML = `🪞 <span class="highlight">${reply}</span>`;
+                        speakText(reply);
+                    } catch (err) {
+                        textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Проверь интернет.';
+                    }
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.log('Ошибка:', event.error);
+                if (event.error === 'not-allowed') {
+                    textDisplay.innerHTML = '❌ <span class="highlight">Доступ запрещён</span><br>Разреши микрофон.';
+                } else if (event.error === 'no-speech') {
+                    textDisplay.innerHTML = '🔇 <span class="highlight">Не слышно</span><br>Говори громче.';
+                }
+                isListening = false;
+            };
+
+            recognition.onend = () => {
+                isListening = false;
+                if (hasStarted) {
+                    setTimeout(startListening, 1000);
+                }
+            };
+
+            try {
+                recognition.start();
+            } catch (e) {
+                console.log('Ошибка старта:', e);
+                isListening = false;
+                setTimeout(startListening, 2000);
+            }
+        }
+
+        // ===================================================
+        // 5. ВОЛНЫ (ВИБРАЦИЯ)
         // ===================================================
         const canvas = document.getElementById('waveCanvas');
         const ctx = canvas.getContext('2d');
@@ -183,138 +301,40 @@
         drawWaves();
 
         // ===================================================
-        // 3. ПРИВЕТСТВИЕ
-        // ===================================================
-        function startConversation() {
-            if (hasStarted) return;
-            hasStarted = true;
-
-            const greeting = 'Ассаляму алейкум! Я — Живое Зеркало. Я слушаю тебя. Говори, я здесь.';
-            textDisplay.innerHTML = '🪞 <span class="highlight">Ассаляму алейкум!</span><br>Я — Живое Зеркало. Говори со мной.';
-            speakText(greeting);
-            setTimeout(() => {
-                startListening();
-            }, 2000);
-        }
-
-        // ===================================================
-        // 4. СЛУШАЕМ И ОТВЕЧАЕМ (С ПРИНУДИТЕЛЬНЫМ МИКРОФОНОМ)
-        // ===================================================
-        async function startListening() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-            if (!SpeechRecognition) {
-                textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Ваш браузер не поддерживает голос.';
-                return;
-            }
-
-            // ПРИНУДИТЕЛЬНО ЗАПРАШИВАЕМ МИКРОФОН, если он не активен
-            if (!mediaStream || !mediaStream.active) {
-                try {
-                    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                } catch (e) {
-                    textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Разреши микрофон.';
-                    setTimeout(startListening, 3000);
-                    return;
-                }
-            }
-
-            if (recognition) {
-                try { recognition.stop(); } catch (e) {}
-            }
-
-            recognition = new SpeechRecognition();
-            recognition.lang = 'ru-RU';
-            recognition.continuous = true;
-            recognition.interimResults = true;
-
-            recognition.onstart = () => {
-                textDisplay.innerHTML = '🎤 <span class="highlight">Я слушаю...</span><br>Говори, я здесь.';
-            };
-
-            recognition.onresult = async (event) => {
-                let spoken = '';
-                for (let i = event.resultIndex; i < event.results.length; i++) {
-                    if (event.results[i].isFinal) {
-                        spoken += event.results[i][0].transcript;
-                    }
-                }
-
-                if (spoken.trim()) {
-                    textDisplay.innerHTML = `🗣️ <span class="highlight">${spoken}</span>`;
-                    try {
-                        const response = await fetch('/api/chat', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ message: spoken, user_id: 'guest' })
-                        });
-                        const data = await response.json();
-                        const reply = data.response || 'Я не поняла. Повтори, пожалуйста.';
-                        textDisplay.innerHTML = `🪞 <span class="highlight">${reply}</span>`;
-                        speakText(reply);
-                    } catch (err) {
-                        textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Проверь интернет.';
-                    }
-                }
-            };
-
-            recognition.onerror = (event) => {
-                console.log('Ошибка:', event.error);
-                if (event.error === 'not-allowed') {
-                    textDisplay.innerHTML = '❌ <span class="highlight">Доступ запрещён</span><br>Разреши микрофон.';
-                } else if (event.error === 'no-speech') {
-                    textDisplay.innerHTML = '🔇 <span class="highlight">Не слышно</span><br>Говори громче.';
-                } else if (event.error === 'aborted') {
-                    // Игнорируем
-                } else {
-                    textDisplay.innerHTML = '⚠️ <span class="highlight">Ошибка</span><br>Перезапускаю...';
-                    setTimeout(startListening, 2000);
-                }
-            };
-
-            recognition.onend = () => {
-                if (hasStarted) {
-                    setTimeout(startListening, 1000);
-                }
-            };
-
-            try {
-                recognition.start();
-            } catch (e) {
-                console.log('Ошибка старта:', e);
-                setTimeout(startListening, 2000);
-            }
-        }
-
-        // ===================================================
-        // 5. ГОЛОС ЗЕРКАЛА
+        // 6. ГОЛОС ЗЕРКАЛА
         // ===================================================
         function speakText(text) {
             if (!window.speechSynthesis) return;
+
             window.speechSynthesis.cancel();
 
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'ru-RU';
-            utterance.rate = 0.9;
-            utterance.pitch = 1.1;
+            utterance.rate = 0.85;
+            utterance.pitch = 1.0;
 
             const voices = window.speechSynthesis.getVoices();
-            const female = voices.find(v =>
+            const preferred = voices.find(v =>
                 v.lang.includes('ru') &&
                 (v.name.includes('Google') || v.name.includes('Microsoft') || v.name.includes('Samantha'))
             );
-            if (female) utterance.voice = female;
+            if (preferred) utterance.voice = preferred;
 
             window.speechSynthesis.speak(utterance);
         }
 
         // ===================================================
-        // 6. ЗАГРУЗКА ГОЛОСОВ
+        // 7. ЗАГРУЗКА ГОЛОСОВ
         // ===================================================
         window.speechSynthesis.getVoices();
         window.speechSynthesis.onvoiceschanged = () => {
             window.speechSynthesis.getVoices();
         };
+
+        // ===================================================
+        // 8. ЗАПУСК
+        // ===================================================
+        startMirror();
     </script>
 </body>
 </html>
