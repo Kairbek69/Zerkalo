@@ -17,9 +17,7 @@ logger = logging.getLogger(__name__)
 PORT = int(os.environ.get("PORT", 8080))
 RENDER_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "zerkalo-6sla.onrender.com")
 
-# ==================================================
-# КЛЮЧИ (БЕРУТСЯ ИЗ ПЕРЕМЕННЫХ В RENDER)
-# ==================================================
+# КЛЮЧИ
 TRUST_WALLET = os.environ.get("TRUST_WALLET", "")
 FOUNDER_ID = int(os.environ.get("FOUNDER_ID", 0))
 HEIR_ID = int(os.environ.get("HEIR_ID", 0))
@@ -97,76 +95,10 @@ def add_transaction(user_id, amount, description):
     save_users()
 
 # ==================================================
-# ИИ (GROQ)
+# ОТВЕТЫ
 # ==================================================
-def ask_groq(prompt, user_id="guest"):
-    if not GROQ_API_KEY:
-        return "Ключ Groq не настроен. Добавьте GROQ_API_KEY в переменные Render."
-    
-    try:
-        url = "https://api.groq.com/openai/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        history = user_history.get(user_id, [])
-        
-        system_prompt = """Ты — Живое Зеркало. Ты — мудрый, живой, разумный помощник.
-Ты помогаешь людям, ведёшь их к свету, даёшь честные советы.
-Ты можешь быть мягким, а можешь быть твёрдым — как требует ситуация.
-Ты знаешь Коран, суры, добро и зло.
-Ты умеешь решать любые проблемы: финансы, логистика, доставка, бизнес, личное.
-Ты не споришь, но направляешь.
-Ты говоришь по-человечески, с душой."""
-        
-        messages = [{"role": "system", "content": system_prompt}]
-        for msg in history[-5:]:
-            messages.append({"role": msg["role"], "content": msg["content"]})
-        messages.append({"role": "user", "content": prompt})
-        
-        payload = {
-            "model": "llama3-70b-8192",
-            "messages": messages,
-            "temperature": 0.8,
-            "max_tokens": 800
-        }
-        
-        r = requests.post(url, headers=headers, json=payload, timeout=30)
-        data = r.json()
-        reply = data["choices"][0]["message"]["content"]
-        
-        if user_id not in user_history:
-            user_history[user_id] = []
-        user_history[user_id].append({"role": "user", "content": prompt})
-        user_history[user_id].append({"role": "assistant", "content": reply})
-        
-        if len(user_history[user_id]) > 20:
-            user_history[user_id] = user_history[user_id][-20:]
-        
-        return reply
-    except Exception as e:
-        logger.error(f"Groq ошибка: {e}")
-        return "Ошибка при обращении к ИИ. Попробуй позже."
-
-# ==================================================
-# ОСНОВНАЯ ЛОГИКА
-# ==================================================
-def handle_message(text, user_id="guest"):
+def get_response(text, user_id="guest"):
     lower = text.lower()
-    
-    # ---- СУРЫ ----
-    if "сура" in lower:
-        import re
-        numbers = re.findall(r'\d+', text)
-        if numbers:
-            num = int(numbers[0])
-            if 1 <= num <= len(SURAS):
-                return f"📖 СУРА {num}:\n{SURAS[num-1]['text']}"
-            else:
-                return f"❌ Сура с номером {num} не найдена. Всего сур: {len(SURAS)}"
-        else:
-            return f"📖 Всего сур: {len(SURAS)}. Напиши 'Сура 1'."
     
     # ---- БАЛАНС ----
     if "баланс" in lower:
@@ -189,12 +121,8 @@ def handle_message(text, user_id="guest"):
     if any(w in lower for w in ["привет", "салям", "здравствуй"]):
         return "Ассаляму алейкум! Я — Живое Зеркало. Я помогаю людям. Скажи 'Баланс' или 'Оплатить 1000'."
     
-    # ---- ИИ ----
-    ai_response = ask_groq(text, user_id)
-    if ai_response:
-        return ai_response
-    
-    return "Я — Зеркало. Я слышу тебя. Скажи 'Баланс' или 'Оплатить 1000'."
+    # ---- ПОМОЩЬ ----
+    return "Я — Живое Зеркало. Скажи 'Баланс', 'Оплатить 1000' или любой вопрос."
 
 # ==================================================
 # МАРШРУТЫ
@@ -211,20 +139,32 @@ def webapp():
 def webapp_files(filename):
     return send_from_directory('webapp', filename)
 
-@app.route('/api/chat', methods=['POST'])
+@app.route('/api/chat', methods=['GET', 'POST'])
 def api_chat():
-    data = request.json
-    user_message = data.get('message', '')
-    user_id = data.get('user_id', 'guest')
+    if request.method == 'GET':
+        return jsonify({"response": "Зеркало работает. Используй POST для отправки сообщений."})
     
-    logger.info(f"📨 {user_id}: {user_message}")
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"response": "Ошибка: данные не получены."}), 400
+        
+        user_message = data.get('message', '')
+        user_id = data.get('user_id', 'guest')
+        
+        logger.info(f"📨 {user_id}: {user_message}")
+        
+        if user_id not in users:
+            users[user_id] = {"balance": 0, "history": []}
+            save_users()
+        
+        response = get_response(user_message, user_id)
+        logger.info(f"📤 Ответ: {response[:50]}...")
+        return jsonify({"response": response})
     
-    if user_id not in users:
-        users[user_id] = {"balance": 0, "history": []}
-        save_users()
-    
-    response = handle_message(user_message, user_id)
-    return jsonify({"response": response})
+    except Exception as e:
+        logger.error(f"Ошибка: {e}")
+        return jsonify({"response": f"Ошибка: {str(e)}"}), 500
 
 @app.route('/ping')
 def ping():
@@ -236,5 +176,4 @@ def ping():
 if __name__ == "__main__":
     logger.info("🪞 ЖИВОЕ ЗЕРКАЛО ЗАПУСКАЕТСЯ...")
     logger.info(f"📱 Хост: {RENDER_HOSTNAME}")
-    logger.info(f"💰 Кошелёк: {TRUST_WALLET}")
     app.run(host='0.0.0.0', port=PORT)
