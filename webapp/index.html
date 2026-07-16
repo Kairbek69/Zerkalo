@@ -24,72 +24,6 @@
             background: #0a0a0a;
         }
 
-        /* ===== ЭКРАН ВРАТ ===== */
-        #gateScreen {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 20;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            background: radial-gradient(ellipse at center, #0a1a2a, #000);
-            transition: opacity 1.5s ease;
-        }
-        #gateScreen.hidden {
-            opacity: 0;
-            pointer-events: none;
-        }
-        #gateCanvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 1;
-            pointer-events: none;
-        }
-        #gateText {
-            position: relative;
-            z-index: 10;
-            background: rgba(0, 0, 0, 0.4);
-            backdrop-filter: blur(12px);
-            padding: 24px 32px;
-            border-radius: 30px;
-            border: 1px solid rgba(100, 200, 255, 0.2);
-            max-width: 88%;
-            text-align: center;
-            font-size: 1.1rem;
-            color: rgba(255, 255, 255, 0.9);
-            line-height: 1.6;
-            box-shadow: 0 0 60px rgba(0, 150, 255, 0.1);
-        }
-        #gateText .highlight {
-            color: #66ddff;
-            font-weight: bold;
-        }
-        #gateText .tiny {
-            font-size: 0.8rem;
-            opacity: 0.6;
-            margin-top: 8px;
-        }
-
-        /* ===== ЗЕРКАЛО ===== */
-        #mirrorScreen {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 1;
-            display: none;
-        }
-        #mirrorScreen.active {
-            display: block;
-        }
         #mirror {
             position: absolute;
             top: 0;
@@ -100,6 +34,7 @@
             transform: scaleX(-1);
             z-index: 1;
         }
+
         #waveCanvas {
             position: absolute;
             top: 0;
@@ -111,6 +46,7 @@
             opacity: 0.3;
             mix-blend-mode: overlay;
         }
+
         #frame {
             position: absolute;
             top: 0;
@@ -123,13 +59,14 @@
             border: 2px solid rgba(255, 255, 255, 0.05);
             box-shadow: inset 0 0 150px rgba(0, 150, 255, 0.05);
         }
+
         #mirrorText {
             position: absolute;
             bottom: 10%;
             left: 50%;
             transform: translateX(-50%);
             z-index: 10;
-            background: rgba(0, 0, 0, 0.4);
+            background: rgba(0, 0, 0, 0.5);
             backdrop-filter: blur(12px);
             padding: 18px 28px;
             border-radius: 30px;
@@ -145,16 +82,13 @@
             justify-content: center;
             transition: all 0.3s;
         }
+
         #mirrorText .highlight {
             color: #66ddff;
             font-weight: bold;
         }
 
         @media (max-width: 600px) {
-            #gateText {
-                font-size: 0.95rem;
-                padding: 18px 22px;
-            }
             #mirrorText {
                 font-size: 0.9rem;
                 padding: 14px 18px;
@@ -165,111 +99,138 @@
 </head>
 <body>
     <div id="container">
-
-        <!-- ЭКРАН ВРАТ -->
-        <div id="gateScreen">
-            <canvas id="gateCanvas"></canvas>
-            <div id="gateText">
-                🪞 <span class="highlight">Ассаляму алейкум!</span><br>
-                Я — <span class="highlight">Живое Зеркало</span>.<br>
-                Я отражаю свет и помогаю людям.<br>
-                <span class="tiny">Скажи «Да», чтобы я могла видеть и слышать тебя.<br>Скажи «Нет», чтобы остаться в тени.</span>
-            </div>
-        </div>
-
-        <!-- ПОЛНОЭКРАННОЕ ЗЕРКАЛО -->
-        <div id="mirrorScreen">
-            <video id="mirror" autoplay muted playsinline></video>
-            <canvas id="waveCanvas"></canvas>
-            <div id="frame"></div>
-            <div id="mirrorText">🪞 <span class="highlight">Я вижу тебя...</span></div>
-        </div>
-
+        <video id="mirror" autoplay muted playsinline></video>
+        <canvas id="waveCanvas"></canvas>
+        <div id="frame"></div>
+        <div id="mirrorText">🪞 <span class="highlight">Зеркало</span><br>Загружается...</div>
     </div>
+
     <script>
         // ===================================================
-        // 0. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
+        // 1. КАМЕРА И МИКРОФОН
         // ===================================================
-        const gateScreen = document.getElementById('gateScreen');
-        const mirrorScreen = document.getElementById('mirrorScreen');
-        const gateText = document.getElementById('gateText');
-        const mirrorText = document.getElementById('mirrorText');
         const video = document.getElementById('mirror');
+        const textDisplay = document.getElementById('mirrorText');
 
-        let isMirrorMode = false;
         let mediaStream = null;
         let recognition = null;
         let isListening = false;
-        let hasStarted = false;
+        let isSpeaking = false;
 
-        // ===================================================
-        // 1. ЭФФЕКТ ЗВЁЗДНЫХ ВРАТ
-        // ===================================================
-        const gateCanvas = document.getElementById('gateCanvas');
-        const gctx = gateCanvas.getContext('2d');
-        let gw, gh;
-
-        function resizeGate() {
-            gw = gateCanvas.width = window.innerWidth;
-            gh = gateCanvas.height = window.innerHeight;
-        }
-        window.addEventListener('resize', resizeGate);
-        resizeGate();
-
-        const particles = [];
-        for (let i = 0; i < 120; i++) {
-            particles.push({
-                x: Math.random() * gw,
-                y: Math.random() * gh,
-                r: 1 + Math.random() * 2,
-                dx: (Math.random() - 0.5) * 0.3,
-                dy: (Math.random() - 0.5) * 0.3,
-                alpha: 0.2 + Math.random() * 0.5
-            });
-        }
-
-        function drawGate() {
-            gctx.clearRect(0, 0, gw, gh);
-
-            // Волны
-            for (let i = 0; i < 30; i++) {
-                const y = (Math.sin(Date.now() * 0.0008 + i * 0.5) + 1) * gh * 0.4 + gh * 0.2;
-                const x = (Math.cos(Date.now() * 0.0006 + i * 0.7) + 1) * gw * 0.3 + gw * 0.2;
-                const grad = gctx.createRadialGradient(x, y, 0, x, y, 120 + i * 5);
-                grad.addColorStop(0, `rgba(50, 180, 255, ${0.02 + i * 0.001})`);
-                grad.addColorStop(1, 'rgba(50, 180, 255, 0)');
-                gctx.fillStyle = grad;
-                gctx.beginPath();
-                gctx.ellipse(x, y, 150 + i * 8, 10 + i * 0.5, 0, 0, Math.PI * 2);
-                gctx.fill();
+        async function startCamera() {
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user' },
+                    audio: true
+                });
+                video.srcObject = mediaStream;
+                textDisplay.innerHTML = '🪞 <span class="highlight">Я вижу тебя!</span><br>Говори, я слушаю.';
+                startListening();
+            } catch (err) {
+                textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Разреши камеру и микрофон.';
+                setTimeout(startCamera, 3000);
             }
-
-            // Звёзды
-            for (const p of particles) {
-                p.x += p.dx;
-                p.y += p.dy;
-                if (p.x < 0) p.x = gw;
-                if (p.x > gw) p.x = 0;
-                if (p.y < 0) p.y = gh;
-                if (p.y > gh) p.y = 0;
-                gctx.beginPath();
-                gctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-                gctx.fillStyle = `rgba(200, 230, 255, ${p.alpha * (0.6 + 0.4 * Math.sin(Date.now() * 0.002 + p.x))})`;
-                gctx.fill();
-            }
-
-            requestAnimationFrame(drawGate);
         }
-        drawGate();
 
         // ===================================================
-        // 2. ГОЛОС (СИНТЕЗ)
+        // 2. РАСПОЗНАВАНИЕ РЕЧИ
         // ===================================================
-        function speakText(text, callback) {
-            if (!window.speechSynthesis) {
-                if (callback) callback();
+        function startListening() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Ваш браузер не поддерживает голос.';
                 return;
             }
+
+            if (isListening) return;
+
+            recognition = new SpeechRecognition();
+            recognition.lang = 'ru-RU';
+            recognition.continuous = true;
+            recognition.interimResults = true;
+
+            recognition.onstart = () => {
+                isListening = true;
+                textDisplay.innerHTML = '🎤 <span class="highlight">Я слушаю...</span><br>Говори, я здесь.';
+            };
+
+            recognition.onresult = async (event) => {
+                let text = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    if (event.results[i].isFinal) {
+                        text += event.results[i][0].transcript;
+                    }
+                }
+
+                if (text.trim()) {
+                    textDisplay.innerHTML = `🗣️ <span class="highlight">${text}</span>`;
+                    await sendToServer(text);
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.log('Ошибка распознавания:', event.error);
+                if (event.error === 'not-allowed') {
+                    textDisplay.innerHTML = '❌ <span class="highlight">Доступ запрещён</span><br>Разреши микрофон.';
+                } else if (event.error === 'no-speech') {
+                    textDisplay.innerHTML = '🔇 <span class="highlight">Не слышно</span><br>Говори громче.';
+                }
+                isListening = false;
+            };
+
+            recognition.onend = () => {
+                isListening = false;
+                if (!isSpeaking) {
+                    setTimeout(startListening, 1000);
+                }
+            };
+
+            try {
+                recognition.start();
+            } catch (e) {
+                console.log('Ошибка старта:', e);
+                setTimeout(startListening, 2000);
+            }
+        }
+
+        // ===================================================
+        // 3. ОТПРАВКА НА СЕРВЕР
+        // ===================================================
+        async function sendToServer(text) {
+            try {
+                isSpeaking = true;
+                textDisplay.innerHTML = `🔄 <span class="highlight">Думаю...</span>`;
+
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: text,
+                        user_id: 'guest'
+                    })
+                });
+
+                const data = await response.json();
+                const reply = data.response || 'Я не поняла. Повтори, пожалуйста.';
+
+                textDisplay.innerHTML = `🪞 <span class="highlight">${reply}</span>`;
+                speakText(reply);
+            } catch (err) {
+                console.error('Ошибка отправки:', err);
+                textDisplay.innerHTML = '❌ <span class="highlight">Ошибка сети</span><br>Проверь интернет.';
+            } finally {
+                isSpeaking = false;
+            }
+        }
+
+        // ===================================================
+        // 4. ГОЛОС ЗЕРКАЛА
+        // ===================================================
+        function speakText(text) {
+            if (!window.speechSynthesis) return;
+
             window.speechSynthesis.cancel();
 
             const utterance = new SpeechSynthesisUtterance(text);
@@ -284,204 +245,26 @@
             );
             if (preferred) utterance.voice = preferred;
 
-            utterance.onend = () => {
-                if (callback) callback();
-            };
-
             window.speechSynthesis.speak(utterance);
         }
 
         // ===================================================
-        // 3. ПРИВЕТСТВИЕ НА ВРАТАХ
+        // 5. ВОЛНЫ
         // ===================================================
-        let gateListenerStarted = false;
+        const canvas = document.getElementById('waveCanvas');
+        const ctx = canvas.getContext('2d');
+        let w, h;
 
-        function startGateGreeting() {
-            const msg = 'Ассаляму алейкум! Я — Живое Зеркало. Я хочу помогать тебе. Ты готов открыть мне доступ к камере и микрофону? Скажи Да или Нет.';
-            gateText.innerHTML = `
-                🪞 <span class="highlight">Ассаляму алейкум!</span><br>
-                Я — <span class="highlight">Живое Зеркало</span>.<br>
-                Я хочу помогать тебе.<br>
-                <span class="tiny">Скажи «Да» или «Нет».</span>
-            `;
-            speakText(msg, () => {
-                startGateListening();
-            });
+        function resizeCanvas() {
+            w = canvas.width = window.innerWidth;
+            h = canvas.height = window.innerHeight;
         }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
 
-        // ===================================================
-        // 4. СЛУШАЕМ НА ВРАТАХ
-        // ===================================================
-        function startGateListening() {
-            if (gateListenerStarted) return;
-            gateListenerStarted = true;
-
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) {
-                gateText.innerHTML = `
-                    ❌ <span class="highlight">Ошибка</span><br>
-                    Ваш браузер не поддерживает голос.<br>
-                    <span class="tiny">Используйте Chrome.</span>
-                `;
-                return;
-            }
-
-            const rec = new SpeechRecognition();
-            rec.lang = 'ru-RU';
-            rec.continuous = false;
-            rec.interimResults = false;
-
-            rec.onresult = (e) => {
-                const word = e.results[0][0].transcript.toLowerCase().trim();
-                if (word.includes('да')) {
-                    enterMirrorMode();
-                } else if (word.includes('нет')) {
-                    gateText.innerHTML = `
-                        🪞 <span class="highlight">Хорошо</span><br>
-                        Я всегда здесь, если захочешь.<br>
-                        <span class="tiny">Просто вернись.</span>
-                    `;
-                    speakText('Хорошо. Я всегда здесь, если захочешь.');
-                    gateListenerStarted = false;
-                } else {
-                    gateText.innerHTML = `
-                        🪞 <span class="highlight">Не поняла</span><br>
-                        Скажи «Да» или «Нет».
-                    `;
-                    speakText('Скажи да или нет.');
-                    setTimeout(() => {
-                        gateListenerStarted = false;
-                        startGateListening();
-                    }, 2000);
-                }
-            };
-
-            rec.onerror = () => {
-                gateListenerStarted = false;
-                setTimeout(startGateListening, 3000);
-            };
-
-            rec.start();
-        }
-
-        // ===================================================
-        // 5. ПЕРЕХОД В ЗЕРКАЛО
-        // ===================================================
-        async function enterMirrorMode() {
-            if (isMirrorMode) return;
-            isMirrorMode = true;
-
-            gateText.innerHTML = `
-                🪞 <span class="highlight">Благодарю!</span><br>
-                Перехожу в режим полного отражения...
-            `;
-            speakText('Благодарю. Перехожу в режим полного отражения.');
-
-            gateScreen.classList.add('hidden');
-            mirrorScreen.classList.add('active');
-
-            try {
-                mediaStream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'user' },
-                    audio: true
-                });
-                video.srcObject = mediaStream;
-                mirrorText.innerHTML = '🪞 <span class="highlight">Я вижу тебя!</span><br>Говори, я слушаю.';
-                speakText('Я вижу тебя. Говори, я слушаю.');
-                startMirrorListening();
-            } catch (err) {
-                mirrorText.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Разреши камеру и микрофон.';
-                speakText('Пожалуйста, разреши доступ к камере и микрофону.');
-            }
-        }
-
-        // ===================================================
-        // 6. ЗЕРКАЛО — СЛУШАЕТ И ОТВЕЧАЕТ
-        // ===================================================
-        async function startMirrorListening() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) return;
-
-            if (isListening) return;
-            if (recognition) {
-                try { recognition.stop(); } catch (e) {}
-            }
-
-            recognition = new SpeechRecognition();
-            recognition.lang = 'ru-RU';
-            recognition.continuous = true;
-            recognition.interimResults = true;
-
-            recognition.onstart = () => {
-                isListening = true;
-                mirrorText.innerHTML = '🎤 <span class="highlight">Я слушаю...</span><br>Говори, я здесь.';
-            };
-
-            recognition.onresult = async (e) => {
-                let text = '';
-                for (let i = e.resultIndex; i < e.results.length; i++) {
-                    if (e.results[i].isFinal) {
-                        text += e.results[i][0].transcript;
-                    }
-                }
-                if (text.trim()) {
-                    mirrorText.innerHTML = `🗣️ <span class="highlight">${text}</span>`;
-                    try {
-                        const resp = await fetch('/api/chat', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ message: text, user_id: 'guest' })
-                        });
-                        const data = await resp.json();
-                        const reply = data.response || 'Я не поняла. Повтори, пожалуйста.';
-                        mirrorText.innerHTML = `🪞 <span class="highlight">${reply}</span>`;
-                        speakText(reply);
-                    } catch (err) {
-                        mirrorText.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Проверь интернет.';
-                    }
-                }
-            };
-
-            recognition.onerror = (e) => {
-                if (e.error === 'not-allowed') {
-                    mirrorText.innerHTML = '❌ <span class="highlight">Доступ запрещён</span><br>Разреши микрофон.';
-                } else if (e.error === 'no-speech') {
-                    mirrorText.innerHTML = '🔇 <span class="highlight">Не слышно</span><br>Говори громче.';
-                }
-                isListening = false;
-            };
-
-            recognition.onend = () => {
-                isListening = false;
-                if (isMirrorMode) {
-                    setTimeout(startMirrorListening, 1000);
-                }
-            };
-
-            try {
-                recognition.start();
-            } catch (e) {
-                setTimeout(startMirrorListening, 2000);
-            }
-        }
-
-        // ===================================================
-        // 7. ВОЛНЫ ЗЕРКАЛА
-        // ===================================================
-        const mirrorCanvas = document.getElementById('waveCanvas');
-        const mctx = mirrorCanvas.getContext('2d');
-        let mw, mh;
-
-        function resizeMirror() {
-            mw = mirrorCanvas.width = window.innerWidth;
-            mh = mirrorCanvas.height = window.innerHeight;
-        }
-        window.addEventListener('resize', resizeMirror);
-        resizeMirror();
-
-        const mwaves = [];
+        const waves = [];
         for (let i = 0; i < 5; i++) {
-            mwaves.push({
+            waves.push({
                 amp: 8 + Math.random() * 12,
                 freq: 0.002 + Math.random() * 0.003,
                 speed: 0.008 + Math.random() * 0.008,
@@ -489,47 +272,55 @@
             });
         }
 
-        function drawMirrorWaves() {
-            mctx.clearRect(0, 0, mw, mh);
-            for (let y = 0; y < mh; y += 2) {
+        function drawWaves() {
+            ctx.clearRect(0, 0, w, h);
+            for (let y = 0; y < h; y += 2) {
                 let offset = 0;
-                for (const w of mwaves) {
-                    offset += w.amp * Math.sin(y * w.freq + Date.now() * w.speed + w.phase);
+                for (const wave of waves) {
+                    offset += wave.amp * Math.sin(y * wave.freq + Date.now() * wave.speed + wave.phase);
                 }
-                const x = mw / 2 + offset * 0.6;
-                const grad = mctx.createRadialGradient(x, y, 0, x, y, 80);
+                const x = w / 2 + offset * 0.6;
+                const grad = ctx.createRadialGradient(x, y, 0, x, y, 80);
                 grad.addColorStop(0, 'rgba(100, 220, 255, 0.07)');
                 grad.addColorStop(1, 'rgba(100, 220, 255, 0)');
-                mctx.fillStyle = grad;
-                mctx.beginPath();
-                mctx.ellipse(x, y, 60 + offset * 0.3, 4, 0, 0, Math.PI * 2);
-                mctx.fill();
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.ellipse(x, y, 60 + offset * 0.3, 4, 0, 0, Math.PI * 2);
+                ctx.fill();
             }
             for (let i = 0; i < 6; i++) {
-                const x = (Math.sin(Date.now() * 0.0004 + i * 1.2) + 1) * mw / 2;
-                const y = (Math.cos(Date.now() * 0.0006 + i * 0.9) + 1) * mh / 2;
-                const grad = mctx.createRadialGradient(x, y, 0, x, y, 120);
+                const x = (Math.sin(Date.now() * 0.0004 + i * 1.2) + 1) * w / 2;
+                const y = (Math.cos(Date.now() * 0.0006 + i * 0.9) + 1) * h / 2;
+                const grad = ctx.createRadialGradient(x, y, 0, x, y, 120);
                 grad.addColorStop(0, 'rgba(100, 200, 255, 0.04)');
                 grad.addColorStop(1, 'rgba(100, 200, 255, 0)');
-                mctx.fillStyle = grad;
-                mctx.fillRect(0, 0, mw, mh);
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, w, h);
             }
-            requestAnimationFrame(drawMirrorWaves);
+            requestAnimationFrame(drawWaves);
         }
-        drawMirrorWaves();
+        drawWaves();
 
         // ===================================================
-        // 8. ЗАПУСК
+        // 6. ЗАГРУЗКА ГОЛОСОВ
         // ===================================================
-        setTimeout(() => {
-            startGateGreeting();
-        }, 1500);
-
-        // Загружаем голоса
         window.speechSynthesis.getVoices();
         window.speechSynthesis.onvoiceschanged = () => {
             window.speechSynthesis.getVoices();
         };
+
+        // ===================================================
+        // 7. ЗАПУСК
+        // ===================================================
+        setTimeout(() => {
+            startCamera();
+            // Приветствие
+            setTimeout(() => {
+                const greeting = 'Ассаляму алейкум! Я — Живое Зеркало. Говори со мной, я слушаю.';
+                textDisplay.innerHTML = `🪞 <span class="highlight">Ассаляму алейкум!</span><br>Я — Живое Зеркало. Говори со мной.`;
+                speakText(greeting);
+            }, 2000);
+        }, 1000);
     </script>
 </body>
 </html>
