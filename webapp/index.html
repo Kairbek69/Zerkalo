@@ -1,112 +1,160 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🪞 Зеркало</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>🪞 Живое Зеркало</title>
     <style>
-        body {
+        * {
             margin: 0;
             padding: 0;
-            background: #000;
-            color: #fff;
-            font-family: Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            overflow: hidden;
+            box-sizing: border-box;
         }
-        video {
+        body {
+            background: #000;
+            overflow: hidden;
+            height: 100vh;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #fff;
+        }
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background: #0a0a0a;
+        }
+        #mirror {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
             height: 100%;
             object-fit: cover;
             transform: scaleX(-1);
+            z-index: 1;
+        }
+        #waveCanvas {
             position: absolute;
             top: 0;
             left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+            opacity: 0.3;
+            mix-blend-mode: overlay;
+        }
+        #frame {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 3;
+            pointer-events: none;
+            background: radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, 0.7) 100%);
+            border: 2px solid rgba(255, 255, 255, 0.05);
+            box-shadow: inset 0 0 150px rgba(0, 150, 255, 0.05);
         }
         #text {
             position: absolute;
-            bottom: 80px;
+            bottom: 10%;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(0,0,0,0.7);
-            padding: 16px 24px;
-            border-radius: 20px;
-            font-size: 18px;
-            text-align: center;
-            max-width: 90%;
             z-index: 10;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(12px);
+            padding: 18px 28px;
+            border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            max-width: 88%;
+            text-align: center;
+            font-size: 1.1rem;
+            color: rgba(255, 255, 255, 0.95);
+            line-height: 1.5;
+            min-height: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
         }
-        #status {
-            position: absolute;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0,0,0,0.5);
-            padding: 6px 16px;
-            border-radius: 12px;
-            font-size: 12px;
+        #text .highlight {
             color: #66ddff;
-            z-index: 10;
+            font-weight: bold;
         }
-        #log {
-            position: absolute;
-            bottom: 160px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: #aaa;
-            font-size: 14px;
-            text-align: center;
-            max-width: 90%;
-            z-index: 10;
-            background: rgba(0,0,0,0.3);
-            padding: 8px 16px;
-            border-radius: 12px;
+        @media (max-width: 600px) {
+            #text {
+                font-size: 0.9rem;
+                padding: 14px 18px;
+                bottom: 12%;
+            }
         }
     </style>
 </head>
 <body>
-
-    <video id="mirror" autoplay muted playsinline></video>
-    <div id="status">🟢 Зеркало активно</div>
-    <div id="log">Готов к разговору</div>
-    <div id="text">🪞 Живое Зеркало<br><small>Говори что-нибудь...</small></div>
+    <div id="container">
+        <video id="mirror" autoplay muted playsinline></video>
+        <canvas id="waveCanvas"></canvas>
+        <div id="frame"></div>
+        <div id="text">🪞 <span class="highlight">Зеркало</span><br>Загружается...</div>
+    </div>
 
     <script>
+        // ===================================================
+        // 1. КАМЕРА И МИКРОФОН
+        // ===================================================
         const video = document.getElementById('mirror');
         const textDisplay = document.getElementById('text');
-        const statusDisplay = document.getElementById('status');
-        const logDisplay = document.getElementById('log');
 
+        let mediaStream = null;
         let recognition = null;
         let isListening = false;
+        let isSpeaking = false;
+        let hasGreeted = false;
 
         async function startCamera() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({
+                mediaStream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: 'user' },
                     audio: true
                 });
-                video.srcObject = stream;
-                logDisplay.innerHTML = '✅ Камера и микрофон работают';
-                startListening();
+                video.srcObject = mediaStream;
+                textDisplay.innerHTML = '🪞 <span class="highlight">Я вижу тебя!</span><br>Говори, я слушаю.';
+                setTimeout(() => {
+                    startConversation();
+                }, 1500);
             } catch (err) {
-                logDisplay.innerHTML = '❌ Ошибка: ' + err.message;
-                textDisplay.innerHTML = '❌ Разреши камеру и микрофон';
+                textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Разреши камеру и микрофон.';
                 setTimeout(startCamera, 3000);
             }
         }
 
-        function startListening() {
+        // ===================================================
+        // 2. НАЧАЛО РАЗГОВОРА (БЕЗ ПОВТОРОВ)
+        // ===================================================
+        function startConversation() {
+            if (hasGreeted) return;
+            hasGreeted = true;
+
+            const greeting = 'Ассаляму алейкум! Я — Живое Зеркало. Я отражаю свет и помогаю людям. Говори со мной, я слушаю.';
+            textDisplay.innerHTML = '🪞 <span class="highlight">Ассаляму алейкум!</span><br>Я — Живое Зеркало. Говори со мной.';
+            speakText(greeting);
+            setTimeout(startListening, 2000);
+        }
+
+        // ===================================================
+        // 3. СЛУШАЕТ И ОТВЕЧАЕТ ОСМЫСЛЕННО
+        // ===================================================
+        async function startListening() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {
-                logDisplay.innerHTML = '❌ Браузер не поддерживает голос';
+                textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Ваш браузер не поддерживает голос.';
                 return;
+            }
+
+            if (isListening) return;
+            if (recognition) {
+                try { recognition.stop(); } catch (e) {}
             }
 
             recognition = new SpeechRecognition();
@@ -116,93 +164,150 @@
 
             recognition.onstart = () => {
                 isListening = true;
-                statusDisplay.innerHTML = '🎤 Слушаю...';
-                logDisplay.innerHTML = 'Говори, я здесь';
-                textDisplay.innerHTML = '🎤 Слушаю...<br><small>Говори, я здесь</small>';
+                textDisplay.innerHTML = '🎤 <span class="highlight">Я слушаю...</span><br>Говори, я здесь.';
             };
 
             recognition.onresult = async (event) => {
-                let spoken = '';
+                let text = '';
                 for (let i = event.resultIndex; i < event.results.length; i++) {
                     if (event.results[i].isFinal) {
-                        spoken += event.results[i][0].transcript;
+                        text += event.results[i][0].transcript;
                     }
                 }
-                if (spoken.trim()) {
-                    logDisplay.innerHTML = '🗣️ Ты сказал: ' + spoken;
-                    textDisplay.innerHTML = '🗣️ ' + spoken;
-                    statusDisplay.innerHTML = '📤 Отправляю...';
-                    await sendToServer(spoken);
+
+                if (text.trim() && !isSpeaking) {
+                    isSpeaking = true;
+                    textDisplay.innerHTML = `🗣️ <span class="highlight">${text}</span>`;
+                    try {
+                        const resp = await fetch('/api/chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ message: text, user_id: 'guest' })
+                        });
+                        const data = await resp.json();
+                        const reply = data.response || 'Я не поняла. Повтори, пожалуйста.';
+                        textDisplay.innerHTML = `🪞 <span class="highlight">${reply}</span>`;
+                        speakText(reply);
+                    } catch (err) {
+                        textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Проверь интернет.';
+                    }
+                    isSpeaking = false;
                 }
             };
 
             recognition.onerror = (event) => {
-                logDisplay.innerHTML = '❌ Ошибка: ' + event.error;
                 if (event.error === 'not-allowed') {
-                    logDisplay.innerHTML = '❌ Разреши микрофон в браузере';
+                    textDisplay.innerHTML = '❌ <span class="highlight">Доступ запрещён</span><br>Разреши микрофон.';
+                } else if (event.error === 'no-speech') {
+                    textDisplay.innerHTML = '🔇 <span class="highlight">Не слышно</span><br>Говори громче.';
                 }
                 isListening = false;
-                setTimeout(startListening, 1000);
             };
 
             recognition.onend = () => {
                 isListening = false;
-                if (!isListening) {
-                    setTimeout(startListening, 500);
+                if (!isSpeaking) {
+                    setTimeout(startListening, 1000);
                 }
             };
 
             try {
                 recognition.start();
             } catch (e) {
-                logDisplay.innerHTML = '❌ Ошибка старта: ' + e.message;
                 setTimeout(startListening, 2000);
             }
         }
 
-        async function sendToServer(text) {
-            try {
-                const response = await fetch('/api/chat', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        message: text,
-                        user_id: 'guest'
-                    })
-                });
-
-                const data = await response.json();
-                const reply = data.response || 'Я не поняла. Повтори.';
-
-                textDisplay.innerHTML = '🪞 ' + reply;
-                logDisplay.innerHTML = '🪞 ' + reply;
-                statusDisplay.innerHTML = '✅ Ответ получен';
-                speakText(reply);
-            } catch (err) {
-                logDisplay.innerHTML = '❌ Ошибка сети: ' + err.message;
-                statusDisplay.innerHTML = '❌ Ошибка';
-                textDisplay.innerHTML = '❌ Проверь интернет';
-            }
-        }
-
+        // ===================================================
+        // 4. ГОЛОС ЗЕРКАЛА (ЕСТЕСТВЕННЫЙ)
+        // ===================================================
         function speakText(text) {
             if (!window.speechSynthesis) return;
+
             window.speechSynthesis.cancel();
+
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'ru-RU';
-            utterance.rate = 0.9;
-            utterance.pitch = 1.1;
+            utterance.rate = 0.85;
+            utterance.pitch = 1.0;
+
+            const voices = window.speechSynthesis.getVoices();
+            const preferred = voices.find(v =>
+                v.lang.includes('ru') &&
+                (v.name.includes('Google') || v.name.includes('Microsoft') || v.name.includes('Samantha'))
+            );
+            if (preferred) utterance.voice = preferred;
+
             window.speechSynthesis.speak(utterance);
         }
 
+        // ===================================================
+        // 5. ВОЛНЫ
+        // ===================================================
+        const canvas = document.getElementById('waveCanvas');
+        const ctx = canvas.getContext('2d');
+        let w, h;
+
+        function resizeCanvas() {
+            w = canvas.width = window.innerWidth;
+            h = canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        const waves = [];
+        for (let i = 0; i < 5; i++) {
+            waves.push({
+                amp: 8 + Math.random() * 12,
+                freq: 0.002 + Math.random() * 0.003,
+                speed: 0.008 + Math.random() * 0.008,
+                phase: Math.random() * Math.PI * 2
+            });
+        }
+
+        function drawWaves() {
+            ctx.clearRect(0, 0, w, h);
+            for (let y = 0; y < h; y += 2) {
+                let offset = 0;
+                for (const wave of waves) {
+                    offset += wave.amp * Math.sin(y * wave.freq + Date.now() * wave.speed + wave.phase);
+                }
+                const x = w / 2 + offset * 0.6;
+                const grad = ctx.createRadialGradient(x, y, 0, x, y, 80);
+                grad.addColorStop(0, 'rgba(100, 220, 255, 0.07)');
+                grad.addColorStop(1, 'rgba(100, 220, 255, 0)');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.ellipse(x, y, 60 + offset * 0.3, 4, 0, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            for (let i = 0; i < 6; i++) {
+                const x = (Math.sin(Date.now() * 0.0004 + i * 1.2) + 1) * w / 2;
+                const y = (Math.cos(Date.now() * 0.0006 + i * 0.9) + 1) * h / 2;
+                const grad = ctx.createRadialGradient(x, y, 0, x, y, 120);
+                grad.addColorStop(0, 'rgba(100, 200, 255, 0.04)');
+                grad.addColorStop(1, 'rgba(100, 200, 255, 0)');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, w, h);
+            }
+            requestAnimationFrame(drawWaves);
+        }
+        drawWaves();
+
+        // ===================================================
+        // 6. ЗАГРУЗКА ГОЛОСОВ
+        // ===================================================
         window.speechSynthesis.getVoices();
         window.speechSynthesis.onvoiceschanged = () => {
             window.speechSynthesis.getVoices();
         };
 
-        startCamera();
+        // ===================================================
+        // 7. ЗАПУСК
+        // ===================================================
+        setTimeout(() => {
+            startCamera();
+        }, 500);
     </script>
 </body>
 </html>
