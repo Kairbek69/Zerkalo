@@ -5,10 +5,8 @@ import os
 import json
 import logging
 import requests
-import time
-import subprocess
-import tempfile
 import re
+import time
 from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS
 from datetime import datetime
@@ -39,7 +37,7 @@ ADMIN_IDS = [FOUNDER_ID, HEIR_ID]
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
-CORS(app)  # РАЗРЕШАЕМ ЗАПРОСЫ ИЗ БРАУЗЕРА
+CORS(app)
 
 # ==================================================
 # REDIS
@@ -89,7 +87,7 @@ def get_system_prompt():
 """
 
 # ==================================================
-# ПАМЯТЬ
+# ПАМЯТЬ (REDIS)
 # ==================================================
 HISTORY_KEY_PREFIX = "mirror:history:"
 MAX_MESSAGES = 15
@@ -231,6 +229,20 @@ def get_reply(message, user_id="guest"):
 # ==================================================
 bot = telebot.TeleBot(TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
 
+@bot.message_handler(commands=['start'])
+def start(message):
+    markup = telebot.types.InlineKeyboardMarkup()
+    markup.add(telebot.types.InlineKeyboardButton(
+        text="📱 Открыть Зеркало",
+        web_app=telebot.types.WebAppInfo(url=f"https://{RENDER_HOSTNAME}/webapp")
+    ))
+    bot.send_message(
+        message.chat.id,
+        "🪞 **АССАЛЯМУ АЛЕЙКУМ!**\n\nЯ — **Зеркало**. Нажми кнопку, чтобы открыть интерфейс.",
+        reply_markup=markup,
+        parse_mode="Markdown"
+    )
+
 @bot.message_handler(func=lambda m: True)
 def handle_text(message):
     if not bot:
@@ -272,11 +284,19 @@ def webhook():
         return "Error", 500
 
 # ==================================================
-# API ДЛЯ БРАУЗЕРА (ГЛАВНОЕ ИСПРАВЛЕНИЕ)
+# API ДЛЯ БРАУЗЕРА
 # ==================================================
-@app.route('/ping')
-def ping():
-    return jsonify({"status": "ok", "message": "🪞 ЗЕРКАЛО ЖИВО!"})
+@app.route('/')
+def home():
+    return '<h1>🪞 ЖИВОЕ ЗЕРКАЛО</h1><p><a href="/webapp">Открыть</a></p>'
+
+@app.route('/webapp')
+def webapp():
+    return send_from_directory('webapp', 'index.html')
+
+@app.route('/webapp/<path:filename>')
+def webapp_files(filename):
+    return send_from_directory('webapp', filename)
 
 @app.route('/api/chat', methods=['POST'])
 def chat_api():
@@ -300,21 +320,6 @@ def chat_api():
         logger.error(f"❌ Ошибка в /api/chat: {e}")
         return jsonify({"error": str(e)}), 500
 
-# ==================================================
-# WEBAPP
-# ==================================================
-@app.route('/')
-def home():
-    return '<h1>🪞 ЖИВОЕ ЗЕРКАЛО</h1><p><a href="/webapp">Открыть</a></p>'
-
-@app.route('/webapp')
-def webapp():
-    return send_from_directory('webapp', 'index.html')
-
-@app.route('/webapp/<path:filename>')
-def webapp_files(filename):
-    return send_from_directory('webapp', filename)
-
 @app.route('/api/payment', methods=['POST'])
 def api_payment():
     data = request.json
@@ -325,6 +330,10 @@ def api_payment():
         return jsonify({"status": "success", "payment_url": payment_url})
     else:
         return jsonify({"status": "error", "message": error}), 400
+
+@app.route('/ping')
+def ping():
+    return jsonify({"status": "ok", "message": "🪞 ЗЕРКАЛО ЖИВО!"})
 
 # ==================================================
 # ЗАПУСК
