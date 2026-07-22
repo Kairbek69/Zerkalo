@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>🪞 Живое Зеркало</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         * {
             margin: 0;
@@ -89,7 +90,16 @@
 
     <script>
         // ===================================================
-        // 1. КАМЕРА
+        // 1. TELEGRAM WEBAPP
+        // ===================================================
+        const tg = window.Telegram?.WebApp;
+        if (tg) {
+            tg.expand();
+            tg.ready();
+        }
+
+        // ===================================================
+        // 2. КАМЕРА
         // ===================================================
         const video = document.getElementById('mirror');
         const textDisplay = document.getElementById('text');
@@ -118,7 +128,7 @@
         }
 
         // ===================================================
-        // 2. ПРИВЕТСТВИЕ
+        // 3. ПРИВЕТСТВИЕ
         // ===================================================
         function startConversation() {
             if (hasGreeted) return;
@@ -133,7 +143,7 @@
         }
 
         // ===================================================
-        // 3. СЛУШАЕТ И ОТВЕЧАЕТ (С ПЕРЕЗАПУСКОМ)
+        // 4. СЛУШАЕТ И ОТВЕЧАЕТ
         // ===================================================
         function startListening() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -142,7 +152,6 @@
                 return;
             }
 
-            // Если уже слушаем — не запускаем повторно
             if (isListening) return;
 
             if (recognition) {
@@ -233,7 +242,7 @@
         }
 
         // ===================================================
-        // 4. ГОЛОС ЗЕРКАЛА
+        // 5. ГОЛОС ЗЕРКАЛА
         // ===================================================
         function speakText(text) {
             if (!window.speechSynthesis) return;
@@ -256,7 +265,7 @@
         }
 
         // ===================================================
-        // 5. ЗАГРУЗКА ГОЛОСОВ
+        // 6. ЗАГРУЗКА ГОЛОСОВ
         // ===================================================
         window.speechSynthesis.getVoices();
         window.speechSynthesis.onvoiceschanged = () => {
@@ -264,7 +273,7 @@
         };
 
         // ===================================================
-        // 6. ЗАПУСК
+        // 7. ЗАПУСК
         // ===================================================
         setTimeout(() => {
             startCamera();
