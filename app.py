@@ -5,8 +5,12 @@ import os
 import json
 import logging
 import requests
+import time
+import subprocess
+import tempfile
 import re
 from flask import Flask, send_from_directory, request, jsonify
+from flask_cors import CORS
 from datetime import datetime
 import redis
 import openai
@@ -33,12 +37,13 @@ HEIR_ID = int(os.environ.get("HEIR_ID", 0))
 
 ADMIN_IDS = [FOUNDER_ID, HEIR_ID]
 
-# ==================================================
-# ПРИЛОЖЕНИЕ И REDIS
-# ==================================================
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+CORS(app)
 
+# ==================================================
+# REDIS
+# ==================================================
 r = None
 try:
     r = redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=5)
@@ -47,7 +52,7 @@ except Exception as e:
     logger.warning(f"⚠️ Redis недоступен: {e}")
 
 # ==================================================
-# ЗАГРУЗКА СУР
+# СУРЫ
 # ==================================================
 def load_suras():
     try:
@@ -84,7 +89,7 @@ def get_system_prompt():
 """
 
 # ==================================================
-# ПАМЯТЬ (REDIS)
+# ПАМЯТЬ
 # ==================================================
 HISTORY_KEY_PREFIX = "mirror:history:"
 MAX_MESSAGES = 15
@@ -114,7 +119,7 @@ def add_message(chat_id, role, content):
         pass
 
 # ==================================================
-# ИИ (GROQ)
+# GROQ
 # ==================================================
 openai.api_key = GROQ_API_KEY
 openai.api_base = "https://api.groq.com/openai/v1"
@@ -244,13 +249,14 @@ WEBHOOK_URL = f"https://{RENDER_HOSTNAME}/webhook"
 
 def set_webhook():
     if not TELEGRAM_TOKEN:
+        logger.error("❌ TELEGRAM_TOKEN не настроен")
         return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={WEBHOOK_URL}"
-        requests.get(url, timeout=10)
-        logger.info("✅ Webhook установлен")
+        response = requests.get(url, timeout=10)
+        logger.info(f"✅ Webhook установлен: {response.text}")
     except Exception as e:
-        logger.error(f"Ошибка установки webhook: {e}")
+        logger.error(f"❌ Ошибка установки webhook: {e}")
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -285,6 +291,7 @@ def api_chat():
     data = request.json
     message = data.get('message', '')
     user_id = data.get('user_id', 'guest')
+    logger.info(f"📨 {user_id}: {message}")
     response = get_reply(message, user_id)
     return jsonify({"response": response})
 
@@ -308,6 +315,7 @@ def ping():
 # ==================================================
 if __name__ == "__main__":
     logger.info("🪞 ЖИВОЕ ЗЕРКАЛО ЗАПУСКАЕТСЯ...")
+    logger.info(f"📱 Хост: {RENDER_HOSTNAME}")
     if TELEGRAM_TOKEN:
         set_webhook()
     app.run(host='0.0.0.0', port=PORT)
