@@ -3,10 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🪞 Живое Зеркало</title>
+    <title>🪞 Зеркало</title>
+    
+    <!-- ===== ПОДКЛЮЧАЕМ МАНИФЕСТ ДЛЯ PWA ===== -->
+    <link rel="manifest" href="/public/manifest.json">
+    
+    <!-- ===== TELEGRAM WEBAPP ===== -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
         body {
             background: #000;
             overflow: hidden;
@@ -64,9 +74,16 @@
             justify-content: center;
             transition: all 0.3s;
         }
-        #text .highlight { color: #66ddff; font-weight: bold; }
+        #text .highlight {
+            color: #66ddff;
+            font-weight: bold;
+        }
         @media (max-width: 600px) {
-            #text { font-size: 0.9rem; padding: 14px 18px; bottom: 12%; }
+            #text {
+                font-size: 0.9rem;
+                padding: 14px 18px;
+                bottom: 12%;
+            }
         }
     </style>
 </head>
@@ -78,9 +95,18 @@
     </div>
 
     <script>
+        // ===================================================
+        // 1. TELEGRAM WEBAPP
+        // ===================================================
         const tg = window.Telegram?.WebApp;
-        if (tg) { tg.expand(); tg.ready(); }
+        if (tg) {
+            tg.expand();
+            tg.ready();
+        }
 
+        // ===================================================
+        // 2. КАМЕРА
+        // ===================================================
         const video = document.getElementById('mirror');
         const textDisplay = document.getElementById('text');
 
@@ -117,6 +143,9 @@
             }
         }
 
+        // ===================================================
+        // 3. ПРИВЕТСТВИЕ
+        // ===================================================
         function startConversation() {
             if (hasGreeted) return;
             hasGreeted = true;
@@ -129,6 +158,9 @@
             }, 2500);
         }
 
+        // ===================================================
+        // 4. СЛУШАЕТ И ОТВЕЧАЕТ
+        // ===================================================
         function startListening() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {
@@ -169,6 +201,7 @@
                     const lower = text.toLowerCase();
                     textDisplay.innerHTML = `🗣️ <span class="highlight">${text}</span>`;
 
+                    // ---- ПЕРЕКЛЮЧЕНИЕ КАМЕРЫ ----
                     if (lower.includes('тыльная') || lower.includes('сзади') || lower.includes('тыл')) {
                         await startCamera('environment');
                         textDisplay.innerHTML = '🪞 <span class="highlight">Тыльная камера</span><br>Я вижу мир позади тебя.';
@@ -186,6 +219,7 @@
                         return;
                     }
 
+                    // ---- ОБЫЧНЫЙ ЗАПРОС ----
                     try {
                         const resp = await fetch('/api/chat', {
                             method: 'POST',
@@ -244,6 +278,9 @@
             }
         }
 
+        // ===================================================
+        // 5. ГОЛОС ЗЕРКАЛА
+        // ===================================================
         function speakText(text) {
             if (!window.speechSynthesis) return;
             window.speechSynthesis.cancel();
@@ -263,11 +300,17 @@
             window.speechSynthesis.speak(utterance);
         }
 
+        // ===================================================
+        // 6. ЗАГРУЗКА ГОЛОСОВ
+        // ===================================================
         window.speechSynthesis.getVoices();
         window.speechSynthesis.onvoiceschanged = () => {
             window.speechSynthesis.getVoices();
         };
 
+        // ===================================================
+        // 7. ЗАПУСК
+        // ===================================================
         setTimeout(() => {
             startCamera('user');
         }, 500);
