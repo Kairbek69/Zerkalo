@@ -5,19 +5,12 @@ import os
 import json
 import logging
 import requests
-import time
-import subprocess
-import tempfile
 import re
 from flask import Flask, send_from_directory, request, jsonify
 from datetime import datetime
 import redis
 from openai import OpenAI
 import telebot
-import whisper
-from pydub import AudioSegment
-from pydub.silence import split_on_silence
-from gtts import gTTS
 
 # ==================================================
 # НАСТРОЙКИ
@@ -48,10 +41,10 @@ app.secret_key = SECRET_KEY
 
 r = None
 try:
-    r = redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=5, socket_connect_timeout=5)
+    r = redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=5)
     logger.info("✅ Redis подключён")
 except Exception as e:
-    logger.warning(f"⚠️ Redis недоступен: {e}. Работа в режиме без памяти.")
+    logger.warning(f"⚠️ Redis недоступен: {e}")
 
 # ==================================================
 # ЗАГРУЗКА СУР
@@ -139,7 +132,7 @@ def ask_llm_with_context(prompt, user_id="guest"):
     
     try:
         response = client.chat.completions.create(
-            model="llama3-70b-8192",  # исправлено на реальное название модели Groq
+            model="llama3-70b-8192",
             messages=messages,
             temperature=0.7,
             max_tokens=500,
@@ -158,16 +151,8 @@ def create_crypto_payment(amount_usd, description="Оплата через Зе�
         return None, "CryptoCloud API key not configured"
     try:
         url = "https://api.trybit.com/v1/payment"
-        headers = {
-            "Authorization": f"Bearer {CRYPTO_CLOUD_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "amount": amount_usd,
-            "currency": "USD",
-            "description": description,
-            "order_id": f"order_{int(time.time())}"
-        }
+        headers = {"Authorization": f"Bearer {CRYPTO_CLOUD_API_KEY}", "Content-Type": "application/json"}
+        payload = {"amount": amount_usd, "currency": "USD", "description": description, "order_id": f"order_{int(time.time())}"}
         response = requests.post(url, headers=headers, json=payload, timeout=10)
         data = response.json()
         if response.status_code == 200:
@@ -186,54 +171,8 @@ def get_balance():
         resp = requests.get(url, timeout=10)
         data = resp.json()
         return round(data.get("balance", 0) / 1_000_000, 2)
-    except Exception as e:
-        logger.error(f"Ошибка баланса: {e}")
+    except:
         return 0.0
-
-# ==================================================
-# ГОЛОС (STT + TTS)
-# ==================================================
-whisper_model = None  # загружаем лениво при первом запросе
-
-def load_whisper():
-    global whisper_model
-    if whisper_model is None:
-        logger.info("🗣️ Загружаю Whisper (это может занять время)...")
-        whisper_model = whisper.load_model("tiny")  # tiny быстрее и легче
-        logger.info("✅ Whisper загружен")
-
-def remove_silence_and_normalize(input_path, output_path):
-    sound = AudioSegment.from_file(input_path)
-    chunks = split_on_silence(sound, min_silence_len=500, silence_thresh=-40)
-    combined = sum(chunks) if chunks else sound
-    combined.export(output_path, format="wav")
-
-def stt_from_audio_file(file_path):
-    load_whisper()
-    tmp_clean = tempfile.mktemp(suffix=".wav")
-    remove_silence_and_normalize(file_path, tmp_clean)
-    result = whisper_model.transcribe(tmp_clean)
-    os.remove(tmp_clean)
-    return result["text"]
-
-def tts_to_audio(text, output_path):
-    # Сначала пробуем ElevenLabs, если ключ есть
-    el_key = os.environ.get("ELEVENLABS_API_KEY")
-    if el_key:
-        try:
-            url = "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM"
-            headers = {"xi-api-key": el_key, "Content-Type": "application/json"}
-            payload = {"text": text, "voice_settings": {"stability": 0.5, "similarity_boost": 0.5}}
-            resp = requests.post(url, headers=headers, json=payload, timeout=30)
-            if resp.status_code == 200:
-                with open(output_path, "wb") as f:
-                    f.write(resp.content)
-                return
-        except:
-            pass
-    # Запасной вариант: gTTS
-    tts = gTTS(text=text, lang="ru")
-    tts.save(output_path)
 
 # ==================================================
 # ОСНОВНАЯ ЛОГИКА
@@ -289,41 +228,6 @@ def get_reply(message, user_id="guest"):
 # ==================================================
 bot = telebot.TeleBot(TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
 
-@bot.message_handler(content_types=["voice"])
-def handle_voice(message):
-    if not bot:
-        return
-    chat_id = message.chat.id
-    try:
-        file_info = bot.get_file(message.voice.file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-        input_path = f"voice_{chat_id}.ogg"
-        with open(input_path, "wb") as f:
-            f.write(downloaded_file)
-        
-        wav_path = f"voice_{chat_id}.wav"
-        subprocess.run(["ffmpeg", "-y", "-i", input_path, wav_path], check=True, capture_output=True)
-        
-        text = stt_from_audio_file(wav_path)
-        os.remove(input_path)
-        os.remove(wav_path)
-        
-        add_message(str(chat_id), "user", text)
-        answer = get_reply(text, str(chat_id))
-        add_message(str(chat_id), "assistant", answer)
-        
-        audio_path = f"answer_{chat_id}.mp3"
-        tts_to_audio(answer, audio_path)
-        with open(audio_path, "rb") as audio:
-            bot.send_voice(chat_id, audio)
-        os.remove(audio_path)
-    except Exception as e:
-        logger.error(f"Ошибка обработки голоса: {e}")
-        try:
-            bot.reply_to(message, "❌ Ошибка обработки голоса. Попробуй ещё раз.")
-        except:
-            pass
-
 @bot.message_handler(func=lambda m: True)
 def handle_text(message):
     if not bot:
@@ -342,12 +246,11 @@ WEBHOOK_URL = f"https://{RENDER_HOSTNAME}/webhook"
 
 def set_webhook():
     if not TELEGRAM_TOKEN:
-        logger.error("❌ TELEGRAM_TOKEN не настроен")
         return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={WEBHOOK_URL}"
-        response = requests.get(url, timeout=10)
-        logger.info(f"Webhook установлен: {response.text}")
+        requests.get(url, timeout=10)
+        logger.info("✅ Webhook установлен")
     except Exception as e:
         logger.error(f"Ошибка установки webhook: {e}")
 
@@ -357,17 +260,15 @@ def webhook():
         return "No bot", 500
     try:
         data = request.get_json()
-        if not data:
-            return "No data", 400
-        # Обрабатываем через telebot
-        bot.process_new_updates([telebot.types.Update.de_json(data)])
+        if data:
+            bot.process_new_updates([telebot.types.Update.de_json(data)])
         return "OK", 200
     except Exception as e:
         logger.error(f"Ошибка в webhook: {e}")
         return "Error", 500
 
 # ==================================================
-# WEBAPP МАРШРУТЫ
+# WEBAPP
 # ==================================================
 @app.route('/')
 def home():
@@ -386,7 +287,6 @@ def api_chat():
     data = request.json
     message = data.get('message', '')
     user_id = data.get('user_id', 'guest')
-    logger.info(f"📨 {user_id}: {message}")
     response = get_reply(message, user_id)
     return jsonify({"response": response})
 
@@ -410,12 +310,6 @@ def ping():
 # ==================================================
 if __name__ == "__main__":
     logger.info("🪞 ЖИВОЕ ЗЕРКАЛО ЗАПУСКАЕТСЯ...")
-    logger.info(f"📱 Хост: {RENDER_HOSTNAME}")
-    logger.info(f"📖 Сур загружено: {len(SURAS)}")
-    
     if TELEGRAM_TOKEN:
         set_webhook()
-    else:
-        logger.warning("⚠️ TELEGRAM_TOKEN не настроен. Бот не работает.")
-    
     app.run(host='0.0.0.0', port=PORT)
