@@ -4,7 +4,4 @@ flask-cors==4.0.0
 requests==2.31.0
 openai==1.35.0
 redis==5.0.1
-whisper==1.1.10
-pydub==0.25.1
-gTTS==2.3.2
 gunicorn==21.2.0
