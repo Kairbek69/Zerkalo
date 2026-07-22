@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Скачать Зеркало</title>
+    <style>
+        body {
+            background: #0a0a0a;
+            color: #fff;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+        .logo {
+            font-size: 3rem;
+            margin-bottom: 10px;
+        }
+        h1 {
+            font-size: 2rem;
+            color: #66ddff;
+        }
+        p {
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 30px;
+        }
+        .download-btn {
+            display: block;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 15px;
+            text-decoration: none;
+            color: #fff;
+            transition: 0.3s;
+            cursor: pointer;
+        }
+        .download-btn:hover {
+            background: rgba(255,255,255,0.1);
+            border-color: #66ddff;
+        }
+        .download-btn .icon {
+            font-size: 2rem;
+            display: block;
+            margin-bottom: 8px;
+        }
+        .download-btn .platform {
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+        .download-btn .desc {
+            font-size: 0.9rem;
+            color: rgba(255,255,255,0.5);
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 0.8rem;
+            color: rgba(255,255,255,0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🪞</div>
+        <h1>Зеркало</h1>
+        <p>Отражаю свет и помогаю людям.</p>
+
+        <a href="/downloads/zerkalo-android.apk" class="download-btn">
+            <span class="icon">📱</span>
+            <span class="platform">Android</span>
+            <span class="desc">Скачать APK для телефона</span>
+        </a>
+
+        <a href="/downloads/zerkalo-ios.ipa" class="download-btn">
+            <span class="icon">🍏</span>
+            <span class="platform">iOS (iPhone)</span>
+            <span class="desc">Скачать для iPhone</span>
+        </a>
+
+        <a href="/downloads/zerkalo-windows.msix" class="download-btn">
+            <span class="icon">💻</span>
+            <span class="platform">Windows 11</span>
+            <span class="desc">Скачать для компьютера</span>
+        </a>
+
+        <div class="footer">
+            Зеркало — твой личный помощник. Всегда рядом.
+        </div>
+    </div>
+</body>
+</html>
