@@ -40,7 +40,7 @@ app.secret_key = SECRET_KEY
 CORS(app)
 
 # ==================================================
-# REDIS
+# REDIS (ПАМЯТЬ)
 # ==================================================
 r = None
 try:
@@ -233,15 +233,22 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
 def start(message):
     markup = telebot.types.InlineKeyboardMarkup()
     markup.add(telebot.types.InlineKeyboardButton(
-        text="📱 Открыть Зеркало",
+        text="🪞 ОТКРЫТЬ ЗЕРКАЛО",
         web_app=telebot.types.WebAppInfo(url=f"https://{RENDER_HOSTNAME}/webapp")
     ))
     bot.send_message(
         message.chat.id,
-        "🪞 **АССАЛЯМУ АЛЕЙКУМ!**\n\nЯ — **Зеркало**. Нажми кнопку, чтобы открыть интерфейс.",
+        "🪞 **АССАЛЯМУ АЛЕЙКУМ!**\n\nНажми кнопку, чтобы открыть Зеркало.\nОно будет работать прямо в Telegram.",
         reply_markup=markup,
         parse_mode="Markdown"
     )
+
+@bot.message_handler(content_types=["voice"])
+def handle_voice(message):
+    if not bot:
+        return
+    chat_id = message.chat.id
+    bot.reply_to(message, "🎤 Я получил голосовое сообщение. Пока я учусь обрабатывать голос напрямую. Используй кнопку «Открыть Зеркало» для полного интерфейса.")
 
 @bot.message_handler(func=lambda m: True)
 def handle_text(message):
@@ -284,7 +291,7 @@ def webhook():
         return "Error", 500
 
 # ==================================================
-# API ДЛЯ БРАУЗЕРА
+# API ДЛЯ БРАУЗЕРА / WEBAPP
 # ==================================================
 @app.route('/')
 def home():
