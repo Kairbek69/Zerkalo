@@ -5,7 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>🪞 Живое Зеркало</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
         body {
             background: #000;
             overflow: hidden;
@@ -63,9 +67,16 @@
             justify-content: center;
             transition: all 0.3s;
         }
-        #text .highlight { color: #66ddff; font-weight: bold; }
+        #text .highlight {
+            color: #66ddff;
+            font-weight: bold;
+        }
         @media (max-width: 600px) {
-            #text { font-size: 0.9rem; padding: 14px 18px; bottom: 12%; }
+            #text {
+                font-size: 0.9rem;
+                padding: 14px 18px;
+                bottom: 12%;
+            }
         }
     </style>
 </head>
@@ -78,7 +89,7 @@
 
     <script>
         // ===================================================
-        // 1. КАМЕРА И МИКРОФОН
+        // 1. КАМЕРА
         // ===================================================
         const video = document.getElementById('mirror');
         const textDisplay = document.getElementById('text');
@@ -88,7 +99,6 @@
         let isListening = false;
         let isSpeaking = false;
         let hasGreeted = false;
-        let recognitionTimeout = null;
 
         async function startCamera() {
             try {
@@ -108,7 +118,7 @@
         }
 
         // ===================================================
-        // 2. НАЧАЛО РАЗГОВОРА
+        // 2. ПРИВЕТСТВИЕ
         // ===================================================
         function startConversation() {
             if (hasGreeted) return;
@@ -117,23 +127,24 @@
             const greeting = 'Ассаляму алейкум! Я — Живое Зеркало. Я отражаю свет и помогаю людям. Говори со мной, я слушаю.';
             textDisplay.innerHTML = '🪞 <span class="highlight">Ассаляму алейкум!</span><br>Я — Живое Зеркало. Говори со мной.';
             speakText(greeting);
-            setTimeout(startListening, 2000);
+            setTimeout(() => {
+                startListening();
+            }, 2500);
         }
 
         // ===================================================
         // 3. СЛУШАЕТ И ОТВЕЧАЕТ (С ПЕРЕЗАПУСКОМ)
         // ===================================================
         function startListening() {
-            // Если уже слушаем — не запускаем повторно
-            if (isListening) return;
-
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {
                 textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Ваш браузер не поддерживает голос.';
                 return;
             }
 
-            // Закрываем старую сессию
+            // Если уже слушаем — не запускаем повторно
+            if (isListening) return;
+
             if (recognition) {
                 try { recognition.stop(); } catch (e) {}
                 recognition = null;
@@ -159,7 +170,6 @@
 
                 if (text.trim() && !isSpeaking) {
                     isSpeaking = true;
-                    // Останавливаем распознавание на время ответа
                     try { recognition.stop(); } catch (e) {}
                     isListening = false;
 
@@ -178,12 +188,10 @@
                         textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Проверь интернет.';
                     }
 
-                    // После ответа — перезапускаем распознавание
                     isSpeaking = false;
-                    // Задержка перед перезапуском
                     setTimeout(() => {
                         startListening();
-                    }, 1000);
+                    }, 1500);
                 }
             };
 
@@ -192,26 +200,25 @@
                     textDisplay.innerHTML = '❌ <span class="highlight">Доступ запрещён</span><br>Разреши микрофон.';
                 } else if (event.error === 'no-speech') {
                     textDisplay.innerHTML = '🔇 <span class="highlight">Не слышно</span><br>Говори громче.';
-                    // Перезапускаем через 2 секунды, если не говорили
                     setTimeout(() => {
                         if (!isSpeaking && !isListening) {
                             startListening();
                         }
                     }, 2000);
-                } else if (event.error === 'aborted') {
-                    // Игнорируем (это нормально при перезапуске)
-                } else {
+                } else if (event.error !== 'aborted') {
                     isListening = false;
-                    // Перезапускаем при любой ошибке
-                    setTimeout(startListening, 1000);
+                    setTimeout(() => {
+                        startListening();
+                    }, 1000);
                 }
             };
 
             recognition.onend = () => {
                 isListening = false;
-                // Если не говорим — перезапускаем
-                if (!isSpeaking) {
-                    setTimeout(startListening, 500);
+                if (!isSpeaking && hasGreeted) {
+                    setTimeout(() => {
+                        startListening();
+                    }, 500);
                 }
             };
 
@@ -219,7 +226,9 @@
                 recognition.start();
             } catch (e) {
                 isListening = false;
-                setTimeout(startListening, 1000);
+                setTimeout(() => {
+                    startListening();
+                }, 1000);
             }
         }
 
