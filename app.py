@@ -9,7 +9,7 @@ import re
 from flask import Flask, send_from_directory, request, jsonify
 from datetime import datetime
 import redis
-from openai import OpenAI
+import openai
 import telebot
 
 # ==================================================
@@ -116,13 +116,11 @@ def add_message(chat_id, role, content):
 # ==================================================
 # ИИ (GROQ)
 # ==================================================
-client = OpenAI(
-    api_key=GROQ_API_KEY,
-    base_url="https://api.groq.com/openai/v1"
-) if GROQ_API_KEY else None
+openai.api_key = GROQ_API_KEY
+openai.api_base = "https://api.groq.com/openai/v1"
 
 def ask_llm_with_context(prompt, user_id="guest"):
-    if not client:
+    if not GROQ_API_KEY:
         return "Ключ Groq не настроен."
     
     history = get_history(user_id)
@@ -131,7 +129,7 @@ def ask_llm_with_context(prompt, user_id="guest"):
     messages.append({"role": "user", "content": prompt})
     
     try:
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="llama3-70b-8192",
             messages=messages,
             temperature=0.7,
