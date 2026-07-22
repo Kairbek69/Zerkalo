@@ -109,21 +109,31 @@
         let isListening = false;
         let isSpeaking = false;
         let hasGreeted = false;
+        let currentFacing = 'user';
 
-        async function startCamera() {
+        async function startCamera(facingMode = 'user') {
             try {
-                mediaStream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'user' },
+                if (mediaStream) {
+                    mediaStream.getTracks().forEach(track => track.stop());
+                }
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: facingMode },
                     audio: true
                 });
-                video.srcObject = mediaStream;
+                mediaStream = stream;
+                video.srcObject = stream;
+                currentFacing = facingMode;
+                video.style.transform = facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)';
+                
                 textDisplay.innerHTML = '🪞 <span class="highlight">Я вижу тебя!</span><br>Говори, я слушаю.';
-                setTimeout(() => {
-                    startConversation();
-                }, 1500);
+                if (!hasGreeted) {
+                    setTimeout(startConversation, 1500);
+                }
+                return true;
             } catch (err) {
                 textDisplay.innerHTML = '❌ <span class="highlight">Ошибка</span><br>Разреши камеру и микрофон.';
-                setTimeout(startCamera, 3000);
+                setTimeout(() => startCamera('user'), 3000);
+                return false;
             }
         }
 
@@ -134,7 +144,7 @@
             if (hasGreeted) return;
             hasGreeted = true;
 
-            const greeting = 'Ассаляму алейкум! Я — Живое Зеркало. Я отражаю свет и помогаю людям. Говори со мной, я слушаю.';
+            const greeting = 'Ассаляму алейкум! Я — Живое Зеркало. Я отражаю свет и помогаю людям. Говори со мной, я слушаю. Скажи «Тыльная», чтобы переключить камеру.';
             textDisplay.innerHTML = '🪞 <span class="highlight">Ассаляму алейкум!</span><br>Я — Живое Зеркало. Говори со мной.';
             speakText(greeting);
             setTimeout(() => {
@@ -182,7 +192,28 @@
                     try { recognition.stop(); } catch (e) {}
                     isListening = false;
 
+                    const lower = text.toLowerCase();
                     textDisplay.innerHTML = `🗣️ <span class="highlight">${text}</span>`;
+
+                    // ---- ПЕРЕКЛЮЧЕНИЕ КАМЕРЫ ----
+                    if (lower.includes('тыльная') || lower.includes('сзади') || lower.includes('тыл')) {
+                        await startCamera('environment');
+                        textDisplay.innerHTML = '🪞 <span class="highlight">Тыльная камера</span><br>Я вижу мир позади тебя.';
+                        speakText('Переключаю на тыльную камеру');
+                        isSpeaking = false;
+                        setTimeout(startListening, 1500);
+                        return;
+                    }
+                    if (lower.includes('фронтальная') || lower.includes('себя') || lower.includes('зеркало')) {
+                        await startCamera('user');
+                        textDisplay.innerHTML = '🪞 <span class="highlight">Фронтальная камера</span><br>Ты в своём отражении.';
+                        speakText('Возвращаюсь к фронтальной камере');
+                        isSpeaking = false;
+                        setTimeout(startListening, 1500);
+                        return;
+                    }
+
+                    // ---- ОБЫЧНЫЙ ЗАПРОС ----
                     try {
                         const resp = await fetch('/api/chat', {
                             method: 'POST',
@@ -276,7 +307,7 @@
         // 7. ЗАПУСК
         // ===================================================
         setTimeout(() => {
-            startCamera();
+            startCamera('user');
         }, 500);
     </script>
 </body>
