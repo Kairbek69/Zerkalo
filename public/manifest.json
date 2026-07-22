@@ -1,0 +1,13 @@
+{
+  "background_color": "#ffffff",
+  "dir": "ltr",
+  "display": "fullscreen",
+  "name": "Зеркало",
+  "orientation": "portrait",
+  "scope": "/",
+  "short_name": "Зеркало",
+  "start_url": "/webapp",
+  "theme_color": "#ffffff",
+  "lang": "ru",
+  "description": "Отражаю свет и помогаю людям"
+}
