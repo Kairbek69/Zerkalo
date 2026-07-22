@@ -39,7 +39,7 @@ ADMIN_IDS = [FOUNDER_ID, HEIR_ID]
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
-CORS(app)
+CORS(app)  # РАЗРЕШАЕМ ЗАПРОСЫ ИЗ БРАУЗЕРА
 
 # ==================================================
 # REDIS
@@ -119,7 +119,7 @@ def add_message(chat_id, role, content):
         pass
 
 # ==================================================
-# GROQ
+# GROQ (ИИ)
 # ==================================================
 openai.api_key = GROQ_API_KEY
 openai.api_base = "https://api.groq.com/openai/v1"
@@ -272,6 +272,35 @@ def webhook():
         return "Error", 500
 
 # ==================================================
+# API ДЛЯ БРАУЗЕРА (ГЛАВНОЕ ИСПРАВЛЕНИЕ)
+# ==================================================
+@app.route('/ping')
+def ping():
+    return jsonify({"status": "ok", "message": "🪞 ЗЕРКАЛО ЖИВО!"})
+
+@app.route('/api/chat', methods=['POST'])
+def chat_api():
+    data = request.json or {}
+    user_text = data.get('message', '').strip()
+    chat_id = data.get('user_id', 'guest')
+    
+    if not user_text:
+        return jsonify({"error": "Нет текста"}), 400
+    
+    logger.info(f"🗣️ Запрос от браузера: chat_id={chat_id}, text={user_text}")
+    
+    try:
+        add_message(str(chat_id), "user", user_text)
+        answer = get_reply(user_text, str(chat_id))
+        add_message(str(chat_id), "assistant", answer)
+        
+        logger.info("✅ Ответ сформирован")
+        return jsonify({"response": answer})
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /api/chat: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ==================================================
 # WEBAPP
 # ==================================================
 @app.route('/')
@@ -286,15 +315,6 @@ def webapp():
 def webapp_files(filename):
     return send_from_directory('webapp', filename)
 
-@app.route('/api/chat', methods=['POST'])
-def api_chat():
-    data = request.json
-    message = data.get('message', '')
-    user_id = data.get('user_id', 'guest')
-    logger.info(f"📨 {user_id}: {message}")
-    response = get_reply(message, user_id)
-    return jsonify({"response": response})
-
 @app.route('/api/payment', methods=['POST'])
 def api_payment():
     data = request.json
@@ -305,10 +325,6 @@ def api_payment():
         return jsonify({"status": "success", "payment_url": payment_url})
     else:
         return jsonify({"status": "error", "message": error}), 400
-
-@app.route('/ping')
-def ping():
-    return "🪞 ЗЕРКАЛО ЖИВО!", 200
 
 # ==================================================
 # ЗАПУСК
