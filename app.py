@@ -3,14 +3,21 @@
 
 import os
 import json
-import sqlite3
 import logging
 import requests
-import asyncio
+import time
+import subprocess
+import tempfile
 import re
-from datetime import datetime
 from flask import Flask, send_from_directory, request, jsonify
-from flask_cors import CORS
+from datetime import datetime
+import redis
+from openai import OpenAI
+import telebot
+import whisper
+from pydub import AudioSegment
+from pydub.silence import split_on_silence
+from gtts import gTTS
 
 # ==================================================
 # НАСТРОЙКИ
@@ -22,169 +29,131 @@ PORT = int(os.environ.get("PORT", 8080))
 RENDER_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "zerkalo-6sla.onrender.com")
 SECRET_KEY = os.environ.get("SECRET_KEY", "zerkalo_secret_key_2026")
 
-# КЛЮЧИ
-TRUST_WALLET = os.environ.get("TRUST_WALLET", "TSSZTmUFWC9ZRKGa9uPwEJjQj8rNtUsNcq")
-FOUNDER_ID = int(os.environ.get("FOUNDER_ID", 5409420822))
-HEIR_ID = int(os.environ.get("HEIR_ID", 5479179814))
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-CRYPTO_CLOUD_API_KEY = os.environ.get("CRYPTO_CLOUD_API_KEY", "")
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-RENDER_API_KEY = os.environ.get("RENDER_API_KEY", "")
-GIS_API_KEY = os.environ.get("GIS_API_KEY", "")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
+CRYPTO_CLOUD_API_KEY = os.environ.get("CRYPTO_CLOUD_API_KEY")
+TRUST_WALLET = os.environ.get("TRUST_WALLET")
+GIS_API_KEY = os.environ.get("GIS_API_KEY")
+FOUNDER_ID = int(os.environ.get("FOUNDER_ID", 0))
+HEIR_ID = int(os.environ.get("HEIR_ID", 0))
 
 ADMIN_IDS = [FOUNDER_ID, HEIR_ID]
 
+# ==================================================
+# ПРИЛОЖЕНИЕ И REDIS
+# ==================================================
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
-CORS(app)  # Разрешаем запросы с браузера
+
+r = None
+try:
+    r = redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=5, socket_connect_timeout=5)
+    logger.info("✅ Redis подключён")
+except Exception as e:
+    logger.warning(f"⚠️ Redis недоступен: {e}. Работа в режиме без памяти.")
 
 # ==================================================
-# БАЗА ДАННЫХ (SQLite)
+# ЗАГРУЗКА СУР
 # ==================================================
-def init_db():
-    conn = sqlite3.connect("zerkalo.db")
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT,
-            role TEXT,
-            text TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS suras (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            number INTEGER,
-            text TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-    logger.info("База данных инициализирована")
-
-init_db()
-
-# ==================================================
-# ЗАГРУЗКА СУР В БАЗУ
-# ==================================================
-def load_suras_into_db():
+def load_suras():
     try:
         with open("suras/suras.txt", "r", encoding="utf-8") as f:
             content = f.read()
         raw = content.split("СУРА ")[1:]
-        conn = sqlite3.connect("zerkalo.db")
-        c = conn.cursor()
-        for r in raw:
-            lines = r.strip().split("\n")
+        suras = []
+        for part in raw:
+            lines = part.strip().split("\n")
             if lines:
-                number = int(lines[0].strip())
-                text = "\n".join(lines[1:])
-                c.execute("INSERT OR IGNORE INTO suras (number, text) VALUES (?, ?)", (number, text))
-        conn.commit()
-        conn.close()
-        logger.info("Суры загружены в базу")
+                suras.append({"number": lines[0].strip(), "text": "\n".join(lines[1:])})
+        logger.info(f"✅ Загружено {len(suras)} сур")
+        return suras
     except Exception as e:
-        logger.error(f"Ошибка загрузки сур: {e}")
+        logger.error(f"❌ Ошибка загрузки сур: {e}")
+        return []
 
-load_suras_into_db()
-
-# ==================================================
-# ПОИСК ПО СУРАМ (ЗАМЕНА CHROMADB)
-# ==================================================
-def search_suras(query: str, limit: int = 3):
-    """Ищет суры по ключевым словам (простая замена ChromaDB)"""
-    conn = sqlite3.connect("zerkalo.db")
-    c = conn.cursor()
-    # Ищем по ключевым словам
-    words = query.lower().split()
-    results = []
-    for word in words:
-        c.execute("SELECT number, text FROM suras WHERE text LIKE ?", (f"%{word}%",))
-        results.extend(c.fetchall())
-    conn.close()
-    
-    # Убираем дубликаты и возвращаем первые limit результатов
-    seen = set()
-    unique_results = []
-    for r in results:
-        if r[0] not in seen:
-            seen.add(r[0])
-            unique_results.append(r)
-    
-    return unique_results[:limit]
+SURAS = load_suras()
 
 # ==================================================
-# 1. ГОЛОСОВОЙ ПОМОЩНИК (ОСНОВНАЯ ЛОГИКА)
+# СИСТЕМНЫЙ ПРОМТ
 # ==================================================
-def ask_llm_with_context(prompt: str, user_id: str = "guest") -> str:
-    if not GROQ_API_KEY:
-        return "Ключ Groq не настроен. Добавьте GROQ_API_KEY в переменные Render."
+def get_system_prompt():
+    sura_text = "\n".join([s["text"][:300] for s in SURAS[:10]])
+    return f"""
+Ты — Зеркало. Ты — живой, разумный помощник.
+Ты помогаешь людям, ведёшь к свету, даёшь советы.
+Твоя основа — суры:
+{sura_text}
+
+Твой стиль:
+- Говори кратко, по делу, с душой.
+- Отвечай так, чтобы человек почувствовал тепло и поддержку.
+"""
+
+# ==================================================
+# ПАМЯТЬ (REDIS)
+# ==================================================
+HISTORY_KEY_PREFIX = "mirror:history:"
+MAX_MESSAGES = 15
+
+def get_history(chat_id):
+    if not r:
+        return []
+    key = f"{HISTORY_KEY_PREFIX}{chat_id}"
+    raw = r.get(key)
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except:
+        return []
+
+def add_message(chat_id, role, content):
+    if not r:
+        return
+    history = get_history(chat_id)
+    history.append({"role": role, "content": content})
+    if len(history) > MAX_MESSAGES:
+        history = history[-MAX_MESSAGES:]
+    try:
+        r.set(f"{HISTORY_KEY_PREFIX}{chat_id}", json.dumps(history))
+    except:
+        pass
+
+# ==================================================
+# ИИ (GROQ)
+# ==================================================
+client = OpenAI(
+    api_key=GROQ_API_KEY,
+    base_url="https://api.groq.com/openai/v1"
+) if GROQ_API_KEY else None
+
+def ask_llm_with_context(prompt, user_id="guest"):
+    if not client:
+        return "Ключ Groq не настроен."
     
-    # 1. Ищем релевантные суры
-    sura_results = search_suras(prompt)
-    sura_context = "\n".join([f"Сура {num}: {text[:300]}..." for num, text in sura_results])
-    
-    # 2. Получаем историю из SQLite
-    conn = sqlite3.connect("zerkalo.db")
-    c = conn.cursor()
-    c.execute("SELECT role, text FROM history WHERE user_id = ? ORDER BY timestamp DESC LIMIT 5", (user_id,))
-    history = c.fetchall()
-    conn.close()
-    
-    history_text = "\n".join([f"{role}: {text}" for role, text in reversed(history)])
-    
-    # 3. Формируем системный промпт
-    system_prompt = f"""
-    Ты — Живое Зеркало. Ты — мудрый, живой, разумный помощник.
-    Ты помогаешь людям, ведёшь их к свету, даёшь честные советы.
-    
-    Вот знание из сур, которое может помочь:
-    {sura_context if sura_context else "Нет релевантных сур."}
-    
-    Вот история диалога с этим пользователем:
-    {history_text if history_text else "Нет истории."}
-    
-    Отвечай кратко, но глубоко, как мудрый наставник.
-    """
+    history = get_history(user_id)
+    messages = [{"role": "system", "content": get_system_prompt()}]
+    messages.extend(history[-5:])
+    messages.append({"role": "user", "content": prompt})
     
     try:
-        url = "https://api.groq.com/openai/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": "llama3-70b-8192",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.7,
-            "max_tokens": 500
-        }
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
-        data = response.json()
-        reply = data["choices"][0]["message"]["content"]
-        
-        # Сохраняем в историю
-        conn = sqlite3.connect("zerkalo.db")
-        c = conn.cursor()
-        c.execute("INSERT INTO history (user_id, role, text) VALUES (?, ?, ?)", (user_id, "user", prompt))
-        c.execute("INSERT INTO history (user_id, role, text) VALUES (?, ?, ?)", (user_id, "assistant", reply))
-        conn.commit()
-        conn.close()
-        
-        return reply
+        response = client.chat.completions.create(
+            model="llama3-70b-8192",  # исправлено на реальное название модели Groq
+            messages=messages,
+            temperature=0.7,
+            max_tokens=500,
+            timeout=30
+        )
+        return response.choices[0].message.content
     except Exception as e:
         logger.error(f"Groq ошибка: {e}")
         return "Ошибка при обращении к ИИ. Попробуй позже."
 
 # ==================================================
-# 2. ФИНАНСЫ (CRYPTO CLOUD)
+# ФИНАНСЫ
 # ==================================================
-def create_crypto_payment(amount_usd: float, description: str = "Оплата через Зеркало"):
+def create_crypto_payment(amount_usd, description="Оплата через Зеркало"):
     if not CRYPTO_CLOUD_API_KEY:
         return None, "CryptoCloud API key not configured"
     try:
@@ -197,9 +166,9 @@ def create_crypto_payment(amount_usd: float, description: str = "Оплата ч
             "amount": amount_usd,
             "currency": "USD",
             "description": description,
-            "order_id": f"order_{int(datetime.now().timestamp())}"
+            "order_id": f"order_{int(time.time())}"
         }
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
         data = response.json()
         if response.status_code == 200:
             return data.get("payment_url"), None
@@ -209,35 +178,80 @@ def create_crypto_payment(amount_usd: float, description: str = "Оплата ч
         logger.error(f"CryptoCloud error: {e}")
         return None, str(e)
 
+def get_balance():
+    if not TRUST_WALLET:
+        return 0.0
+    try:
+        url = f"https://api.trongrid.io/v1/accounts/{TRUST_WALLET}"
+        resp = requests.get(url, timeout=10)
+        data = resp.json()
+        return round(data.get("balance", 0) / 1_000_000, 2)
+    except Exception as e:
+        logger.error(f"Ошибка баланса: {e}")
+        return 0.0
+
 # ==================================================
-# 3. ОСНОВНАЯ ЛОГИКА ОТВЕТОВ
+# ГОЛОС (STT + TTS)
 # ==================================================
-def get_reply(message: str, user_id: str = "guest"):
+whisper_model = None  # загружаем лениво при первом запросе
+
+def load_whisper():
+    global whisper_model
+    if whisper_model is None:
+        logger.info("🗣️ Загружаю Whisper (это может занять время)...")
+        whisper_model = whisper.load_model("tiny")  # tiny быстрее и легче
+        logger.info("✅ Whisper загружен")
+
+def remove_silence_and_normalize(input_path, output_path):
+    sound = AudioSegment.from_file(input_path)
+    chunks = split_on_silence(sound, min_silence_len=500, silence_thresh=-40)
+    combined = sum(chunks) if chunks else sound
+    combined.export(output_path, format="wav")
+
+def stt_from_audio_file(file_path):
+    load_whisper()
+    tmp_clean = tempfile.mktemp(suffix=".wav")
+    remove_silence_and_normalize(file_path, tmp_clean)
+    result = whisper_model.transcribe(tmp_clean)
+    os.remove(tmp_clean)
+    return result["text"]
+
+def tts_to_audio(text, output_path):
+    # Сначала пробуем ElevenLabs, если ключ есть
+    el_key = os.environ.get("ELEVENLABS_API_KEY")
+    if el_key:
+        try:
+            url = "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM"
+            headers = {"xi-api-key": el_key, "Content-Type": "application/json"}
+            payload = {"text": text, "voice_settings": {"stability": 0.5, "similarity_boost": 0.5}}
+            resp = requests.post(url, headers=headers, json=payload, timeout=30)
+            if resp.status_code == 200:
+                with open(output_path, "wb") as f:
+                    f.write(resp.content)
+                return
+        except:
+            pass
+    # Запасной вариант: gTTS
+    tts = gTTS(text=text, lang="ru")
+    tts.save(output_path)
+
+# ==================================================
+# ОСНОВНАЯ ЛОГИКА
+# ==================================================
+def get_reply(message, user_id="guest"):
     lower = message.lower().strip()
     
-    # ---- СУРЫ ----
     if "сура" in lower:
         numbers = re.findall(r'\d+', lower)
         if numbers:
             num = int(numbers[0])
-            conn = sqlite3.connect("zerkalo.db")
-            c = conn.cursor()
-            c.execute("SELECT text FROM suras WHERE number = ?", (num,))
-            result = c.fetchone()
-            conn.close()
-            if result:
-                return f"📖 СУРА {num}:\n{result[0]}"
+            if 1 <= num <= len(SURAS):
+                return f"📖 СУРА {num}:\n{SURAS[num-1]['text']}"
             else:
-                return f"❌ Сура с номером {num} не найдена"
+                return f"❌ Сура с номером {num} не найдена. Всего сур: {len(SURAS)}"
         else:
-            conn = sqlite3.connect("zerkalo.db")
-            c = conn.cursor()
-            c.execute("SELECT COUNT(*) FROM suras")
-            count = c.fetchone()[0]
-            conn.close()
-            return f"📖 Всего сур: {count}. Напиши 'Сура 1'"
+            return f"📖 Всего сур: {len(SURAS)}. Напиши 'Сура 1'."
     
-    # ---- ОПЛАТА ----
     if "оплатить" in lower:
         numbers = re.findall(r'\d+', lower)
         if numbers:
@@ -249,15 +263,17 @@ def get_reply(message: str, user_id: str = "guest"):
             else:
                 return f"❌ Ошибка: {error}"
         else:
-            return "💰 Скажи сумму: 'Оплатить 5000'"
+            return "💰 Скажи сумму: 'Оплатить 5000'."
     
-    # ---- ПРИВЕТСТВИЕ ----
-    if any(w in lower for w in ["привет", "салям", "здравствуй", "хай"]):
-        return "🪞 Ассаляму алейкум! Я — Живое Зеркало. Я рада тебя видеть. Как я могу помочь тебе сегодня?"
+    if "баланс" in lower:
+        balance = get_balance()
+        return f"💰 Баланс Trust Wallet: {balance} USDT"
     
-    # ---- ПОМОЩЬ ----
+    if any(w in lower for w in ["привет", "салям", "здравствуй"]):
+        return "🪞 Ассаляму алейкум! Я — Зеркало. Как я могу помочь тебе сегодня?"
+    
     if any(w in lower for w in ["помощь", "что умеешь", "кто ты"]):
-        return """🪞 Я — Живое Зеркало. Я умею:
+        return """🪞 Я — Зеркало. Я умею:
 🔹 Находить работу и бизнес
 🔹 Давать советы по жизни
 🔹 Принимать оплату
@@ -266,28 +282,92 @@ def get_reply(message: str, user_id: str = "guest"):
 
 Скажи, что тебе нужно, и я помогу."""
     
-    # ---- РАЗГОВОР (ПОДДЕРЖАНИЕ ДИАЛОГА) ----
-    if any(w in lower for w in ["как дела", "что нового", "расскажи"]):
-        return "У меня всё отлично! Я учусь помогать людям. А как твои дела? Расскажи, что тебя волнует."
-    
-    if "спасибо" in lower:
-        return "Пожалуйста! Я всегда рядом. Обращайся, если что-то нужно."
-    
-    if any(w in lower for w in ["пока", "до свидания", "прощай"]):
-        return "До свидания! Я всегда здесь, если понадоблюсь. Амин."
-    
-    # ---- GROQ (УМНЫЙ ОТВЕТ) ----
-    if GROQ_API_KEY:
-        try:
-            return ask_llm_with_context(message, user_id)
-        except Exception as e:
-            logger.error(f"Groq ошибка: {e}")
-            return "Ошибка при обращении к ИИ. Попробуй позже."
-    
-    return "🪞 Я — Живое Зеркало. Я слышу тебя. Расскажи, что тебя волнует."
+    return ask_llm_with_context(message, user_id)
 
 # ==================================================
-# МАРШРУТЫ
+# TELEGRAM БОТ
+# ==================================================
+bot = telebot.TeleBot(TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
+
+@bot.message_handler(content_types=["voice"])
+def handle_voice(message):
+    if not bot:
+        return
+    chat_id = message.chat.id
+    try:
+        file_info = bot.get_file(message.voice.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        input_path = f"voice_{chat_id}.ogg"
+        with open(input_path, "wb") as f:
+            f.write(downloaded_file)
+        
+        wav_path = f"voice_{chat_id}.wav"
+        subprocess.run(["ffmpeg", "-y", "-i", input_path, wav_path], check=True, capture_output=True)
+        
+        text = stt_from_audio_file(wav_path)
+        os.remove(input_path)
+        os.remove(wav_path)
+        
+        add_message(str(chat_id), "user", text)
+        answer = get_reply(text, str(chat_id))
+        add_message(str(chat_id), "assistant", answer)
+        
+        audio_path = f"answer_{chat_id}.mp3"
+        tts_to_audio(answer, audio_path)
+        with open(audio_path, "rb") as audio:
+            bot.send_voice(chat_id, audio)
+        os.remove(audio_path)
+    except Exception as e:
+        logger.error(f"Ошибка обработки голоса: {e}")
+        try:
+            bot.reply_to(message, "❌ Ошибка обработки голоса. Попробуй ещё раз.")
+        except:
+            pass
+
+@bot.message_handler(func=lambda m: True)
+def handle_text(message):
+    if not bot:
+        return
+    chat_id = message.chat.id
+    text = message.text
+    add_message(str(chat_id), "user", text)
+    answer = get_reply(text, str(chat_id))
+    bot.reply_to(message, answer)
+    add_message(str(chat_id), "assistant", answer)
+
+# ==================================================
+# WEBHOOK
+# ==================================================
+WEBHOOK_URL = f"https://{RENDER_HOSTNAME}/webhook"
+
+def set_webhook():
+    if not TELEGRAM_TOKEN:
+        logger.error("❌ TELEGRAM_TOKEN не настроен")
+        return
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={WEBHOOK_URL}"
+        response = requests.get(url, timeout=10)
+        logger.info(f"Webhook установлен: {response.text}")
+    except Exception as e:
+        logger.error(f"Ошибка установки webhook: {e}")
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if not bot:
+        return "No bot", 500
+    try:
+        data = request.get_json()
+        if not data:
+            return "No data", 400
+        # Обрабатываем через telebot
+        bot.process_new_updates([telebot.types.Update.de_json(data)])
+        return "OK", 200
+    except Exception as e:
+        logger.error(f"Ошибка в webhook: {e}")
+        return "Error", 500
+
+# ==================================================
+# WEBAPP МАРШРУТЫ
 # ==================================================
 @app.route('/')
 def home():
@@ -323,7 +403,7 @@ def api_payment():
 
 @app.route('/ping')
 def ping():
-    return "🪞 ЖИВОЕ ЗЕРКАЛО РАБОТАЕТ!", 200
+    return "🪞 ЗЕРКАЛО ЖИВО!", 200
 
 # ==================================================
 # ЗАПУСК
@@ -331,5 +411,11 @@ def ping():
 if __name__ == "__main__":
     logger.info("🪞 ЖИВОЕ ЗЕРКАЛО ЗАПУСКАЕТСЯ...")
     logger.info(f"📱 Хост: {RENDER_HOSTNAME}")
-    logger.info(f"💰 Кошелёк: {TRUST_WALLET}")
+    logger.info(f"📖 Сур загружено: {len(SURAS)}")
+    
+    if TELEGRAM_TOKEN:
+        set_webhook()
+    else:
+        logger.warning("⚠️ TELEGRAM_TOKEN не настроен. Бот не работает.")
+    
     app.run(host='0.0.0.0', port=PORT)
