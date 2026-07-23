@@ -56,10 +56,10 @@
       "url": "url"
     }
   },
-  "iarc_rating_id": "",
+  "iarc_rating_id": "0",
   "widgets": [],
   "edge_side_panel": {},
-  "display_override": [],
+  "display_override": ["window-controls-overlay", "tabbed"],
   "note_taking": {},
   "scope_extensions": []
 }
