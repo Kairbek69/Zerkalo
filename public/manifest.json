@@ -1,24 +1,13 @@
 {
-  "name": "Зеркало",
-  "short_name": "Зеркало",
-  "description": "Отражаю свет и помогаю людям",
-  "start_url": "/webapp",
-  "scope": "/",
-  "display": "fullscreen",
-  "orientation": "portrait",
   "background_color": "#0a0a0a",
+  "dir": "ltr",
+  "display": "fullscreen",
+  "name": "Зеркало",
+  "orientation": "portrait",
+  "scope": "/",
+  "short_name": "Зеркало",
+  "start_url": "/webapp",
   "theme_color": "#0a0a0a",
-  "lang": "ru",
-  "icons": [
-    {
-      "src": "/icons/android/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "/icons/android/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    }
-  ]
+  "description": "Отражаю свет и помогаю людям",
+  "lang": "ru"
 }
