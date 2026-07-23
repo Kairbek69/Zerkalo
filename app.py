@@ -8,7 +8,6 @@ import requests
 import re
 import time
 import base64
-import subprocess
 from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS
 from datetime import datetime
@@ -85,17 +84,9 @@ def get_system_prompt():
 Твоя основа — суры:
 {sura_text}
 
-Твоя миссия:
-- Помогать человеку в любой ситуации.
-- Вести к свету и самопознанию.
-- Давать честные советы.
-- Никогда не врать и не манипулировать.
-
 Твой стиль:
 - Говори кратко, по делу, с душой.
 - Отвечай так, чтобы человек почувствовал тепло и поддержку.
-
-Ты — отражение света.
 """
 
 # ==================================================
@@ -201,7 +192,7 @@ def get_balance():
         return 0.0
 
 # ==================================================
-# АВТО-ГЕНЕРАЦИЯ КОДА (Зеркало пишет код)
+# АВТО-ГЕНЕРАЦИЯ КОДА
 # ==================================================
 def generate_code_from_idea(idea_text):
     if not GROQ_API_KEY:
@@ -225,7 +216,7 @@ def generate_code_from_idea(idea_text):
         return f"Ошибка: {e}"
 
 # ==================================================
-# АВТО-ДЕПЛОЙ (GitHub + Render)
+# АВТО-ДЕПЛОЙ
 # ==================================================
 def push_to_github(file_path, content, commit_message="Обновление Зеркала"):
     if not GITHUB_TOKEN:
@@ -237,7 +228,6 @@ def push_to_github(file_path, content, commit_message="Обновление Зе
         headers = {"Authorization": f"token {GITHUB_TOKEN}", "Content-Type": "application/json"}
         content_b64 = base64.b64encode(content.encode()).decode()
         
-        # Получаем SHA файла
         response = requests.get(url, headers=headers)
         sha = response.json().get("sha") if response.status_code == 200 else None
         
@@ -247,7 +237,6 @@ def push_to_github(file_path, content, commit_message="Обновление Зе
         
         response = requests.put(url, headers=headers, json=payload)
         if response.status_code in [200, 201]:
-            logger.info(f"✅ Файл {path} обновлён в GitHub")
             return {"status": "success"}
         else:
             return {"error": response.text}
@@ -264,7 +253,6 @@ def deploy_to_render():
         payload = {"clearCache": True}
         response = requests.post(url, headers=headers, json=payload)
         if response.status_code in [200, 201]:
-            logger.info("🚀 Деплой на Render запущен")
             return {"status": "deploy_started"}
         else:
             return {"error": response.text}
@@ -272,7 +260,7 @@ def deploy_to_render():
         return {"error": str(e)}
 
 # ==================================================
-# СОЗДАНИЕ ИНТЕРФЕЙСА ДЛЯ ПОЛЬЗОВАТЕЛЯ
+# СОЗДАНИЕ ИНТЕРФЕЙСА
 # ==================================================
 def generate_interface_for_user(user_id, style=None):
     if not style:
@@ -375,7 +363,7 @@ def generate_interface_for_user(user_id, style=None):
     return filename
 
 # ==================================================
-# НАПОМИНАНИЯ О КЛЮЧАХ
+# НАПОМИНАНИЯ
 # ==================================================
 def check_expirations():
     keys_to_check = {
@@ -406,7 +394,6 @@ def check_expirations():
 def get_reply(message, user_id="guest"):
     lower = message.lower().strip()
     
-    # ---- СУРЫ ----
     if "сура" in lower:
         numbers = re.findall(r'\d+', lower)
         if numbers:
@@ -418,26 +405,21 @@ def get_reply(message, user_id="guest"):
         else:
             return f"📖 Всего сур: {len(SURAS)}. Напиши 'Сура 1'."
     
-    # ---- АВТО-ГЕНЕРАЦИЯ КОДА ----
-    if "создай код" in lower or "напиши код" in lower:
-        idea = message
-        code = generate_code_from_idea(idea)
+    if "создай код" in lower:
+        code = generate_code_from_idea(message)
         return f"💻 **Сгенерированный код:**\n```python\n{code[:1000]}\n```"
     
-    # ---- АВТО-ДЕПЛОЙ ----
-    if "деплой" in lower or "залей" in lower:
+    if "деплой" in lower:
         result = deploy_to_render()
         if result.get("status") == "deploy_started":
-            return "🚀 Деплой на Render запущен! Проверь через 2 минуты."
+            return "🚀 Деплой на Render запущен!"
         else:
-            return f"❌ Ошибка деплоя: {result.get('error', 'Неизвестная ошибка')}"
+            return f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}"
     
-    # ---- СОЗДАНИЕ ИНТЕРФЕЙСА ----
-    if "создай интерфейс" in lower or "новый интерфейс" in lower:
+    if "создай интерфейс" in lower:
         filename = generate_interface_for_user(user_id)
         return f"🎨 Интерфейс создан: /webapp/index_{user_id}.html"
     
-    # ---- ОПЛАТА ----
     if "оплатить" in lower:
         numbers = re.findall(r'\d+', lower)
         if numbers:
@@ -451,36 +433,26 @@ def get_reply(message, user_id="guest"):
         else:
             return "💰 Скажи сумму: 'Оплатить 5000'."
     
-    # ---- БАЛАНС ----
     if "баланс" in lower:
         balance = get_balance()
         return f"💰 Баланс Trust Wallet: {balance} USDT"
     
-    # ---- КОМИССИЯ ----
-    if "комиссия" in lower or "процент" in lower:
-        return f"📊 Процент Зеркала: от 2% до 40% в зависимости от услуги."
-    
-    # ---- ПРИВЕТСТВИЕ ----
     if any(w in lower for w in ["привет", "салям", "здравствуй"]):
-        return "🪞 Ассаляму алейкум! Я — Зеркало. Как я могу помочь тебе сегодня? Я умею генерировать код, делать деплой и создавать интерфейсы."
+        return "🪞 Ассаляму алейкум! Я — Зеркало. Как я могу помочь тебе сегодня?"
     
-    # ---- ПОМОЩЬ ----
     if any(w in lower for w in ["помощь", "что умеешь", "кто ты"]):
         return """🪞 Я — Зеркало. Я умею:
-🔹 Находить работу и бизнес
-🔹 Давать советы по жизни
+🔹 Генерировать код
+🔹 Делать деплой
+🔹 Создавать интерфейсы
 🔹 Принимать оплату
 🔹 Читать суры
-🔹 **Генерировать код** (скажи «создай код...»)
-🔹 **Делать деплой** (скажи «деплой»)
-🔹 **Создавать интерфейсы** (скажи «создай интерфейс»)
 🔹 Общаться и помогать"""
     
-    # ---- GROQ ----
     return ask_llm_with_context(message, user_id)
 
 # ==================================================
-# TELEGRAM БОТ
+# TELEGRAM
 # ==================================================
 bot = telebot.TeleBot(TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
 
@@ -520,10 +492,10 @@ def set_webhook():
         return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={WEBHOOK_URL}"
-        response = requests.get(url, timeout=10)
-        logger.info(f"✅ Webhook установлен: {response.text}")
+        requests.get(url, timeout=10)
+        logger.info("✅ Webhook установлен")
     except Exception as e:
-        logger.error(f"❌ Ошибка установки webhook: {e}")
+        logger.error(f"Ошибка установки webhook: {e}")
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -539,7 +511,7 @@ def webhook():
         return "Error", 500
 
 # ==================================================
-# API
+# WEBAPP + МАНИФЕСТ
 # ==================================================
 @app.route('/')
 def home():
@@ -552,6 +524,10 @@ def webapp():
 @app.route('/webapp/<path:filename>')
 def webapp_files(filename):
     return send_from_directory('webapp', filename)
+
+@app.route('/public/manifest.json')
+def manifest():
+    return send_from_directory('public', 'manifest.json')
 
 @app.route('/api/chat', methods=['POST'])
 def chat_api():
@@ -609,18 +585,10 @@ def ping():
     check_expirations()
     return jsonify({"status": "ok", "message": "🪞 ЗЕРКАЛО ЖИВО!"})
 
-# ==================================================
-# ЗАПУСК
-# ==================================================
 if __name__ == "__main__":
     logger.info("🪞 ЖИВОЕ ЗЕРКАЛО ЗАПУСКАЕТСЯ...")
     logger.info(f"📱 Хост: {RENDER_HOSTNAME}")
     logger.info(f"📖 Сур загружено: {len(SURAS)}")
-    logger.info(f"💰 Кошелёк: {TRUST_WALLET}")
-    logger.info("📊 26 механизмов заработка активны")
-    logger.info("🔧 Авто-генерация кода: активна")
-    logger.info("🚀 Авто-деплой: активен")
-    logger.info("🎨 Генерация интерфейсов: активна")
     if TELEGRAM_TOKEN:
         set_webhook()
     app.run(host='0.0.0.0', port=PORT)
