@@ -511,7 +511,7 @@ def webhook():
         return "Error", 500
 
 # ==================================================
-# WEBAPP + МАНИФЕСТ
+# WEBAPP + МАНИФЕСТ + SERVICE WORKER
 # ==================================================
 @app.route('/')
 def home():
@@ -528,6 +528,10 @@ def webapp_files(filename):
 @app.route('/public/manifest.json')
 def manifest():
     return send_from_directory('public', 'manifest.json')
+
+@app.route('/sw.js')
+def service_worker():
+    return send_from_directory('.', 'sw.js')
 
 @app.route('/api/chat', methods=['POST'])
 def chat_api():
