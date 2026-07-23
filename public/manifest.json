@@ -33,6 +33,33 @@
     }
   ],
   "categories": ["productivity", "tools"],
+  "shortcuts": [
+    {
+      "name": "Открыть Зеркало",
+      "url": "/webapp",
+      "description": "Открыть голосового помощника"
+    }
+  ],
+  "file_handlers": [],
+  "launch_handler": {
+    "route_to": "existing-client"
+  },
+  "protocol_handlers": [],
   "prefer_related_applications": false,
-  "related_applications": []
+  "related_applications": [],
+  "share_target": {
+    "action": "/webapp",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "iarc_rating_id": "",
+  "widgets": [],
+  "edge_side_panel": {},
+  "display_override": [],
+  "note_taking": {},
+  "scope_extensions": []
 }
