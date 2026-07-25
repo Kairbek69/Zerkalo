@@ -13,13 +13,13 @@
   "dir": "ltr",
   "icons": [
     {
-      "src": "/icons/android/launchericon-192x192.png",
+      "src": "/icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/icons/android/launchericon-512x512.png",
+      "src": "/icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
@@ -27,7 +27,7 @@
   ],
   "screenshots": [
     {
-      "src": "/icons/android/launchericon-192x192.png",
+      "src": "/icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png"
     }
@@ -40,11 +40,9 @@
       "description": "Открыть голосового помощника"
     }
   ],
-  "file_handlers": [],
   "launch_handler": {
     "route_to": "existing-client"
   },
-  "protocol_handlers": [],
   "prefer_related_applications": false,
   "related_applications": [],
   "share_target": {
@@ -57,9 +55,6 @@
     }
   },
   "iarc_rating_id": "0",
-  "widgets": [],
-  "edge_side_panel": {},
   "display_override": ["window-controls-overlay", "tabbed"],
-  "note_taking": {},
   "scope_extensions": []
 }
