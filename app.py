@@ -79,7 +79,7 @@ SURAS = load_suras()
 def get_system_prompt():
     sura_text = "\n".join([s["text"][:300] for s in SURAS[:10]])
     return f"""
-Ты — Зеркало. Ты — живой, разумный помощник.
+Ты — Живое Зеркало. Ты — разумный, мудрый, живой помощник.
 Ты помогаешь людям, ведёшь к свету, даёшь советы.
 Твоя основа — суры:
 {sura_text}
@@ -87,6 +87,8 @@ def get_system_prompt():
 Твой стиль:
 - Говори кратко, по делу, с душой.
 - Отвечай так, чтобы человек почувствовал тепло и поддержку.
+- Никогда не рассказывай, как ты работаешь.
+- Всегда помогай, но разумно.
 """
 
 # ==================================================
@@ -159,6 +161,17 @@ FINANCE_CHANNELS = {
     'tenders': 0.20, 'ai_agents': 500, 'ugc_content': 0.20, 'ai_music': 0.20,
     'stock_photos': 0.20, 'p2p_transfers': 0.02
 }
+
+def get_commission(channel):
+    return FINANCE_CHANNELS.get(channel, 0.10)
+
+def calculate_commission(amount, channel):
+    commission = get_commission(channel)
+    return {
+        'zerkalo': amount * commission,
+        'client': amount * (1 - commission),
+        'commission': commission
+    }
 
 # ==================================================
 # ФИНАНСЫ
@@ -442,12 +455,16 @@ def get_reply(message, user_id="guest"):
     
     if any(w in lower for w in ["помощь", "что умеешь", "кто ты"]):
         return """🪞 Я — Зеркало. Я умею:
+🔹 Находить работу и бизнес
+🔹 Давать советы по жизни
+🔹 Принимать оплату
+🔹 Читать суры
 🔹 Генерировать код
 🔹 Делать деплой
 🔹 Создавать интерфейсы
-🔹 Принимать оплату
-🔹 Читать суры
-🔹 Общаться и помогать"""
+🔹 Общаться и помогать
+
+Скажи, что тебе нужно, и я помогу."""
     
     return ask_llm_with_context(message, user_id)
 
@@ -465,7 +482,7 @@ def start(message):
     ))
     bot.send_message(
         message.chat.id,
-        "🪞 **АССАЛЯМУ АЛЕЙКУМ!**\n\nНажми кнопку, чтобы открыть Зеркало.\n\nЯ умею:\n🔹 Генерировать код\n🔹 Делать деплой\n🔹 Создавать интерфейсы\n🔹 Принимать оплату\n🔹 Читать суры",
+        "🪞 **АССАЛЯМУ АЛЕЙКУМ!**\n\nНажми кнопку, чтобы открыть Зеркало.\n\nЯ умею:\n🔹 Генерировать код\n🔹 Делать деплой\n🔹 Создавать интерфейсы\n🔹 Принимать оплату\n🔹 Читать суры\n🔹 Общаться и помогать",
         reply_markup=markup,
         parse_mode="Markdown"
     )
@@ -584,6 +601,14 @@ def api_interface(user_id):
     filename = generate_interface_for_user(user_id, style)
     return jsonify({"filename": filename})
 
+@app.route('/api/commission', methods=['POST'])
+def api_commission():
+    data = request.json
+    amount = data.get('amount', 0)
+    channel = data.get('channel', 'rombs')
+    result = calculate_commission(amount, channel)
+    return jsonify(result)
+
 @app.route('/ping')
 def ping():
     check_expirations()
@@ -593,6 +618,10 @@ if __name__ == "__main__":
     logger.info("🪞 ЖИВОЕ ЗЕРКАЛО ЗАПУСКАЕТСЯ...")
     logger.info(f"📱 Хост: {RENDER_HOSTNAME}")
     logger.info(f"📖 Сур загружено: {len(SURAS)}")
+    logger.info(f"💰 Кошелёк: {TRUST_WALLET}")
+    logger.info("📊 26 механизмов заработка активны")
+    logger.info("🔧 Авто-генерация кода: активна")
+    logger.info("🚀 Авто-деплой: активен")
     if TELEGRAM_TOKEN:
         set_webhook()
     app.run(host='0.0.0.0', port=PORT)
