@@ -43,6 +43,35 @@ app.secret_key = SECRET_KEY
 CORS(app)
 
 # ==================================================
+# СОЗДАНИЕ ИКОНОК ПРИ ЗАПУСКЕ (ВЫНОСИМ В НАЧАЛО)
+# ==================================================
+def create_default_icons():
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        icons_dir = "static/icons"
+        if not os.path.exists(icons_dir):
+            os.makedirs(icons_dir)
+        
+        for size in [192, 512]:
+            filepath = f"{icons_dir}/icon-{size}.png"
+            if not os.path.exists(filepath):
+                img = Image.new('RGB', (size, size), color='#0a0a0a')
+                d = ImageDraw.Draw(img)
+                try:
+                    font = ImageFont.truetype("arial.ttf", size//3)
+                except:
+                    font = ImageFont.load_default()
+                d.text((size//2-20, size//2-20), "Z", fill='#66ddff', font=font)
+                img.save(filepath)
+                logger.info(f"✅ Иконка {size}x{size} создана")
+        logger.info("✅ Все иконки созданы автоматически")
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось создать иконки: {e}. Убедись, что Pillow установлена.")
+
+# Вызываем создание иконок
+create_default_icons()
+
+# ==================================================
 # REDIS
 # ==================================================
 r = None
@@ -550,6 +579,13 @@ def manifest():
 def service_worker():
     return send_from_directory('.', 'sw.js')
 
+# ==================================================
+# СТАТИЧЕСКИЕ ФАЙЛЫ (ИКОНКИ)
+# ==================================================
+@app.route('/static/<path:filename>')
+def static_files(filename):
+    return send_from_directory('static', filename)
+
 @app.route('/api/chat', methods=['POST'])
 def chat_api():
     data = request.json or {}
@@ -614,6 +650,9 @@ def ping():
     check_expirations()
     return jsonify({"status": "ok", "message": "🪞 ЗЕРКАЛО ЖИВО!"})
 
+# ==================================================
+# ЗАПУСК
+# ==================================================
 if __name__ == "__main__":
     logger.info("🪞 ЖИВОЕ ЗЕРКАЛО ЗАПУСКАЕТСЯ...")
     logger.info(f"📱 Хост: {RENDER_HOSTNAME}")
