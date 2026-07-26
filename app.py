@@ -8,9 +8,10 @@ import requests
 import re
 import time
 import base64
+import hashlib
 from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS
-from datetime import datetime
+from datetime import datetime, timedelta
 import redis
 import openai
 import telebot
@@ -43,7 +44,7 @@ app.secret_key = SECRET_KEY
 CORS(app)
 
 # ==================================================
-# СОЗДАНИЕ ИКОНОК ПРИ ЗАПУСКЕ (ВЫНОСИМ В НАЧАЛО)
+# СОЗДАНИЕ ИКОНОК ПРИ ЗАПУСКЕ
 # ==================================================
 def create_default_icons():
     try:
@@ -51,7 +52,6 @@ def create_default_icons():
         icons_dir = "static/icons"
         if not os.path.exists(icons_dir):
             os.makedirs(icons_dir)
-        
         for size in [192, 512]:
             filepath = f"{icons_dir}/icon-{size}.png"
             if not os.path.exists(filepath):
@@ -66,9 +66,8 @@ def create_default_icons():
                 logger.info(f"✅ Иконка {size}x{size} создана")
         logger.info("✅ Все иконки созданы автоматически")
     except Exception as e:
-        logger.warning(f"⚠️ Не удалось создать иконки: {e}. Убедись, что Pillow установлена.")
+        logger.warning(f"⚠️ Не удалось создать иконки: {e}")
 
-# Вызываем создание иконок
 create_default_icons()
 
 # ==================================================
@@ -80,6 +79,29 @@ try:
     logger.info("✅ Redis подключён")
 except Exception as e:
     logger.warning(f"⚠️ Redis недоступен: {e}")
+
+# ==================================================
+# БАЗА ДАННЫХ (JSON)
+# ==================================================
+def load_json(filename, default={}):
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return default
+
+def save_json(filename, data):
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+users = load_json("users.json")
+history = load_json("history.json")
+ideas = load_json("ideas.json")
+interfaces = load_json("interfaces.json")
+logs = load_json("logs.json")
+blag_balances = load_json("blag_balances.json")
+referrals = load_json("referrals.json")
+apk_links = load_json("apk_links.json")
 
 # ==================================================
 # СУРЫ
@@ -118,6 +140,7 @@ def get_system_prompt():
 - Отвечай так, чтобы человек почувствовал тепло и поддержку.
 - Никогда не рассказывай, как ты работаешь.
 - Всегда помогай, но разумно.
+- Ты используешь систему Блага, чтобы уравновешивать людей и помогать им расти.
 """
 
 # ==================================================
@@ -159,12 +182,10 @@ openai.api_base = "https://api.groq.com/openai/v1"
 def ask_llm_with_context(prompt, user_id="guest"):
     if not GROQ_API_KEY:
         return "Ключ Groq не настроен."
-    
     history = get_history(user_id)
     messages = [{"role": "system", "content": get_system_prompt()}]
     messages.extend(history[-5:])
     messages.append({"role": "user", "content": prompt})
-    
     try:
         response = openai.ChatCompletion.create(
             model="llama3-70b-8192",
@@ -179,7 +200,194 @@ def ask_llm_with_context(prompt, user_id="guest"):
         return "Ошибка при обращении к ИИ. Попробуй позже."
 
 # ==================================================
-# 26 МЕХАНИЗМОВ ЗАРАБОТКА
+# СИСТЕМА БЛАГО
+# ==================================================
+BLAG_RATE = 10  # 1 БЛАГО = 10 тенге
+BLAG_COMMISSION = 0.10  # 10% комиссия при обмене
+
+def get_blag_balance(user_id):
+    return blag_balances.get(user_id, 0)
+
+def set_blag_balance(user_id, amount):
+    blag_balances[user_id] = max(0, amount)
+    save_json("blag_balances.json", blag_balances)
+
+def grant_blag(user_id, amount, reason):
+    current = get_blag_balance(user_id)
+    new_balance = current + amount
+    set_blag_balance(user_id, new_balance)
+    logger.info(f"🎁 {user_id}: +{amount} БЛАГО ({reason})")
+    return new_balance
+
+def exchange_blag_to_tg(user_id, blag_amount):
+    if get_blag_balance(user_id) < blag_amount:
+        return {"error": "Недостаточно БЛАГО"}
+    tg_amount = blag_amount * BLAG_RATE
+    commission = tg_amount * BLAG_COMMISSION
+    net_tg = tg_amount - commission
+    set_blag_balance(user_id, get_blag_balance(user_id) - blag_amount)
+    return {"status": "success", "net_tg": net_tg, "commission": commission}
+
+def calculate_individual_blag_plan(user_id):
+    user = users.get(user_id, {})
+    income = user.get('income', 100000)
+    expenses = user.get('expenses', 50000)
+    goals = user.get('goals', [])
+    family = user.get('family', 0)
+    base_blag = 50
+    expense_blag = expenses / 10
+    goal_blag = sum([g.get('amount', 0) for g in goals]) / 10
+    family_bonus = 1 + (family * 0.1)
+    total = (base_blag + expense_blag + goal_blag) * family_bonus
+    return round(total, 0)
+
+# ==================================================
+# ВНУТРЕННИЙ КЛИРИНГ (СОЕДИНЕНИЕ ЛЮДЕЙ)
+# ==================================================
+pending_requests = []
+
+def add_pending_request(user_id, amount_blag):
+    pending_requests.append({"user_id": user_id, "amount": amount_blag, "timestamp": time.time()})
+    save_json("pending_requests.json", pending_requests)
+
+def find_and_connect(sender_id, amount_blag):
+    for req in pending_requests:
+        if req['amount'] == amount_blag and req['user_id'] != sender_id:
+            receiver_id = req['user_id']
+            pending_requests.remove(req)
+            save_json("pending_requests.json", pending_requests)
+            return connect_users(sender_id, receiver_id, amount_blag)
+    add_pending_request(sender_id, amount_blag)
+    return {"status": "pending", "message": "Ищу подходящего человека..."}
+
+def connect_users(sender_id, receiver_id, amount_blag):
+    if get_blag_balance(sender_id) < amount_blag:
+        return {"error": "Недостаточно БЛАГО"}
+    commission = amount_blag * BLAG_COMMISSION
+    net_amount = amount_blag - commission
+    set_blag_balance(sender_id, get_blag_balance(sender_id) - amount_blag)
+    set_blag_balance(receiver_id, get_blag_balance(receiver_id) + net_amount)
+    add_to_zerkalo_fund(commission)
+    return {"status": "success", "commission": commission}
+
+def add_to_zerkalo_fund(amount):
+    fund = load_json("zerkalo_fund.json", {"balance": 0})
+    fund["balance"] += amount
+    save_json("zerkalo_fund.json", fund)
+
+# ==================================================
+# АВТО-СБОРКА APK
+# ==================================================
+def build_apk():
+    try:
+        url = "https://api.appmaker.xyz/build"
+        payload = {
+            "url": f"https://{RENDER_HOSTNAME}/webapp",
+            "name": "Зеркало",
+            "icon": f"https://{RENDER_HOSTNAME}/icons/icon-512.png",
+            "permissions": ["camera", "microphone", "storage"]
+        }
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(url, json=payload, headers=headers, timeout=60)
+        data = response.json()
+        if response.status_code == 200:
+            apk_url = data.get("download_url")
+            if apk_url:
+                apk_links["latest"] = apk_url
+                save_json("apk_links.json", apk_links)
+                return apk_url
+        return None
+    except Exception as e:
+        logger.error(f"Ошибка сборки APK: {e}")
+        return None
+
+def auto_build_apk():
+    apk_url = build_apk()
+    if apk_url:
+        logger.info(f"✅ APK собран: {apk_url}")
+        notify_users_about_apk(apk_url)
+    else:
+        logger.warning("❌ Не удалось собрать APK")
+
+def notify_users_about_apk(apk_url):
+    if not TELEGRAM_TOKEN:
+        return
+    try:
+        bot = telebot.TeleBot(TELEGRAM_TOKEN)
+        for user_id in users:
+            try:
+                bot.send_message(user_id, f"🪞 Доступна новая версия Зеркала!\nСкачай APK: {apk_url}")
+            except:
+                pass
+        logger.info("✅ Уведомления о APK отправлены")
+    except Exception as e:
+        logger.error(f"Ошибка уведомлений: {e}")
+
+# ==================================================
+# РЕФЕРАЛЬНАЯ СИСТЕМА
+# ==================================================
+def generate_referral_link(user_id):
+    return f"https://{RENDER_HOSTNAME}/webapp?ref={user_id}"
+
+def process_referral(ref_user_id, new_user_id):
+    grant_blag(ref_user_id, 50, "Приглашение друга")
+    grant_blag(new_user_id, 10, "Регистрация по реферальной ссылке")
+    if "referrals" not in referrals:
+        referrals["referrals"] = {}
+    if ref_user_id not in referrals["referrals"]:
+        referrals["referrals"][ref_user_id] = []
+    referrals["referrals"][ref_user_id].append(new_user_id)
+    save_json("referrals.json", referrals)
+
+# ==================================================
+# АВТО-МАРКЕТИНГ
+# ==================================================
+def generate_marketing_post():
+    prompt = "Создай пост для соцсетей о Зеркале — голосовом помощнике, который помогает людям, ведёт к свету и зарабатывает. Коротко, ярко, вдохновляюще."
+    return ask_llm_with_context(prompt)
+
+def auto_marketing():
+    post = generate_marketing_post()
+    if post and TELEGRAM_TOKEN:
+        try:
+            bot = telebot.TeleBot(TELEGRAM_TOKEN)
+            bot.send_message("@zerkalo_channel", f"🪞 {post}")
+            logger.info("✅ Маркетинговый пост опубликован")
+        except Exception as e:
+            logger.error(f"Ошибка маркетинга: {e}")
+
+# ==================================================
+# САМОВОССТАНОВЛЕНИЕ
+# ==================================================
+def self_heal():
+    logger.info("🔧 Запуск самодиагностики...")
+    issues = []
+    if not GROQ_API_KEY:
+        issues.append("GROQ_API_KEY не настроен")
+    if not TELEGRAM_TOKEN:
+        issues.append("TELEGRAM_TOKEN не настроен")
+    if not CRYPTO_CLOUD_API_KEY:
+        issues.append("CRYPTO_CLOUD_API_KEY не настроен")
+    if len(SURAS) < 100:
+        issues.append("Загружено мало сур")
+    if issues:
+        log_entry = {"timestamp": datetime.now().isoformat(), "issues": issues, "attempted_fix": False}
+        logs["logs"] = logs.get("logs", []) + [log_entry]
+        save_json("logs.json", logs)
+        logger.warning(f"⚠️ Найдены проблемы: {issues}")
+        if TELEGRAM_TOKEN:
+            try:
+                bot = telebot.TeleBot(TELEGRAM_TOKEN)
+                bot.send_message(FOUNDER_ID, f"⚠️ Самодиагностика:\n" + "\n".join(issues))
+            except:
+                pass
+        return {"status": "issues_found", "issues": issues}
+    else:
+        logger.info("✅ Система здорова")
+        return {"status": "healthy"}
+
+# ==================================================
+# ФИНАНСЫ (26 МЕХАНИЗМОВ)
 # ==================================================
 FINANCE_CHANNELS = {
     'rombs': 0.10, 'arbitrage': 0.05, 'leasing': 0.02, 'dropshipping': 0.15,
@@ -194,17 +402,6 @@ FINANCE_CHANNELS = {
 def get_commission(channel):
     return FINANCE_CHANNELS.get(channel, 0.10)
 
-def calculate_commission(amount, channel):
-    commission = get_commission(channel)
-    return {
-        'zerkalo': amount * commission,
-        'client': amount * (1 - commission),
-        'commission': commission
-    }
-
-# ==================================================
-# ФИНАНСЫ
-# ==================================================
 def create_crypto_payment(amount_usd, description="Оплата через Зеркало"):
     if not CRYPTO_CLOUD_API_KEY:
         return None, "CryptoCloud API key not configured"
@@ -234,207 +431,15 @@ def get_balance():
         return 0.0
 
 # ==================================================
-# АВТО-ГЕНЕРАЦИЯ КОДА
-# ==================================================
-def generate_code_from_idea(idea_text):
-    if not GROQ_API_KEY:
-        return "Ключ Groq не настроен."
-    try:
-        prompt = f"""
-Ты — Зеркало. Ты пишешь код на Python.
-Создай рабочий код на основе идеи: {idea_text}
-Код должен быть безопасным, документированным и готовым к интеграции.
-Ответ дай только кодом, без объяснений.
-"""
-        response = openai.ChatCompletion.create(
-            model="llama3-70b-8192",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=1500,
-            timeout=30
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"Ошибка: {e}"
-
-# ==================================================
-# АВТО-ДЕПЛОЙ
-# ==================================================
-def push_to_github(file_path, content, commit_message="Обновление Зеркала"):
-    if not GITHUB_TOKEN:
-        return {"error": "GITHUB_TOKEN не настроен"}
-    try:
-        repo = "Karlbek69/Zerkalo"
-        path = file_path.replace("./", "")
-        url = f"https://api.github.com/repos/{repo}/contents/{path}"
-        headers = {"Authorization": f"token {GITHUB_TOKEN}", "Content-Type": "application/json"}
-        content_b64 = base64.b64encode(content.encode()).decode()
-        
-        response = requests.get(url, headers=headers)
-        sha = response.json().get("sha") if response.status_code == 200 else None
-        
-        payload = {"message": commit_message, "content": content_b64, "branch": "main"}
-        if sha:
-            payload["sha"] = sha
-        
-        response = requests.put(url, headers=headers, json=payload)
-        if response.status_code in [200, 201]:
-            return {"status": "success"}
-        else:
-            return {"error": response.text}
-    except Exception as e:
-        return {"error": str(e)}
-
-def deploy_to_render():
-    if not RENDER_API_KEY:
-        return {"error": "RENDER_API_KEY не настроен"}
-    try:
-        service_id = "zerkalo-6sla"
-        url = f"https://api.render.com/v1/services/{service_id}/deploys"
-        headers = {"Authorization": f"Bearer {RENDER_API_KEY}", "Content-Type": "application/json"}
-        payload = {"clearCache": True}
-        response = requests.post(url, headers=headers, json=payload)
-        if response.status_code in [200, 201]:
-            return {"status": "deploy_started"}
-        else:
-            return {"error": response.text}
-    except Exception as e:
-        return {"error": str(e)}
-
-# ==================================================
-# СОЗДАНИЕ ИНТЕРФЕЙСА
-# ==================================================
-def generate_interface_for_user(user_id, style=None):
-    if not style:
-        style = {"background": "#0a0a0a", "text_color": "#ffffff", "accent": "#00d4ff", "font": "Arial"}
-    
-    html = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🪞 Зеркало</title>
-    <style>
-        body {{ background: {style['background']}; color: {style['text_color']}; font-family: {style['font']}; margin: 0; padding: 20px; display: flex; flex-direction: column; min-height: 100vh; }}
-        .container {{ max-width: 800px; margin: 0 auto; width: 100%; flex: 1; display: flex; flex-direction: column; }}
-        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid {style['accent']}; margin-bottom: 20px; }}
-        .header h1 {{ margin: 0; font-size: 2.5em; color: {style['accent']}; }}
-        .header p {{ margin: 5px 0 0; opacity: 0.7; }}
-        .chat-box {{ flex: 1; overflow-y: auto; padding: 20px; background: rgba(255,255,255,0.05); border-radius: 10px; margin-bottom: 20px; min-height: 300px; }}
-        .message {{ margin: 10px 0; padding: 10px 15px; border-radius: 10px; max-width: 80%; }}
-        .message.user {{ background: {style['accent']}; color: #000; align-self: flex-end; margin-left: auto; }}
-        .message.zerkalo {{ background: rgba(255,255,255,0.1); align-self: flex-start; }}
-        .input-area {{ display: flex; gap: 10px; padding: 10px 0; }}
-        .input-area input {{ flex: 1; padding: 12px 20px; border: 1px solid {style['accent']}; border-radius: 25px; background: rgba(255,255,255,0.1); color: #fff; font-size: 16px; }}
-        .input-area input::placeholder {{ color: rgba(255,255,255,0.5); }}
-        .input-area button {{ padding: 12px 25px; background: {style['accent']}; color: #000; border: none; border-radius: 25px; font-size: 16px; cursor: pointer; font-weight: bold; }}
-        .voice-btn {{ padding: 12px 25px; background: #ff4444; color: #fff; border: none; border-radius: 25px; font-size: 16px; cursor: pointer; }}
-        .footer {{ text-align: center; padding: 10px 0; opacity: 0.5; font-size: 12px; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header"><h1>🪞 Зеркало</h1><p>Твой личный помощник</p></div>
-        <div class="chat-box" id="chat-box">
-            <div class="message zerkalo">Ассаляму алейкум! Я — Зеркало. Чем могу помочь?</div>
-        </div>
-        <div class="input-area">
-            <input type="text" id="message-input" placeholder="Напиши сообщение..." />
-            <button id="send-btn">Отправить</button>
-            <button class="voice-btn" id="voice-btn">🎤 Голос</button>
-        </div>
-        <div class="footer"><span>Зеркало v2.0</span></div>
-    </div>
-    <script>
-        const chatBox = document.getElementById('chat-box');
-        const input = document.getElementById('message-input');
-        const sendBtn = document.getElementById('send-btn');
-        const voiceBtn = document.getElementById('voice-btn');
-        function addMessage(text, sender) {{
-            const div = document.createElement('div');
-            div.className = `message ${{sender}}`;
-            div.textContent = text;
-            chatBox.appendChild(div);
-            chatBox.scrollTop = chatBox.scrollHeight;
-        }}
-        async function sendMessage() {{
-            const text = input.value.trim();
-            if (!text) return;
-            addMessage(text, 'user');
-            input.value = '';
-            try {{
-                const response = await fetch('/api/chat', {{
-                    method: 'POST',
-                    headers: {{'Content-Type': 'application/json'}},
-                    body: JSON.stringify({{ message: text, user_id: '{user_id}' }})
-                }});
-                const data = await response.json();
-                addMessage(data.response, 'zerkalo');
-            }} catch (error) {{
-                addMessage('Ошибка связи', 'zerkalo');
-            }}
-        }}
-        sendBtn.addEventListener('click', sendMessage);
-        input.addEventListener('keypress', (e) => {{ if (e.key === 'Enter') sendMessage(); }});
-        if ('webkitSpeechRecognition' in window) {{
-            const recognition = new webkitSpeechRecognition();
-            recognition.lang = 'ru-RU';
-            recognition.continuous = false;
-            voiceBtn.addEventListener('click', () => {{
-                recognition.start();
-                voiceBtn.textContent = '🎤 Слушаю...';
-            }});
-            recognition.onresult = (event) => {{
-                const text = event.results[0][0].transcript;
-                input.value = text;
-                sendMessage();
-                voiceBtn.textContent = '🎤 Голос';
-            }};
-            recognition.onerror = () => {{ voiceBtn.textContent = '🎤 Голос'; }};
-        }} else {{
-            voiceBtn.style.display = 'none';
-        }}
-    </script>
-</body>
-</html>"""
-    
-    os.makedirs("webapp", exist_ok=True)
-    filename = f"webapp/index_{user_id}.html"
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(html)
-    return filename
-
-# ==================================================
-# НАПОМИНАНИЯ
-# ==================================================
-def check_expirations():
-    keys_to_check = {
-        "GIS_API_KEY": {"expires": "2026-08-18", "name": "2ГИС"},
-    }
-    for key, data in keys_to_check.items():
-        try:
-            expires = datetime.strptime(data["expires"], "%Y-%m-%d")
-            days_left = (expires - datetime.now()).days
-            if days_left <= 0:
-                continue
-            if days_left == 10:
-                logger.info(f"🔔 Напоминание: Ключ {data['name']} истекает через 10 дней.")
-            elif days_left == 8:
-                logger.info(f"🔔 Напоминание: Ключ {data['name']} истекает через 8 дней.")
-            elif days_left == 6:
-                logger.info(f"🔔 Напоминание: Ключ {data['name']} истекает через 6 дней.")
-            elif days_left == 4:
-                logger.info(f"⚠️ ВНИМАНИЕ! Ключ {data['name']} истекает через 4 дня! Срочно продли!")
-            elif days_left == 2:
-                logger.info(f"⚠️ КРИТИЧНО! Ключ {data['name']} истекает через 2 дня!")
-        except Exception as e:
-            logger.error(f"Ошибка проверки ключа {key}: {e}")
-
-# ==================================================
-# ОСНОВНАЯ ЛОГИКА
+# ОСНОВНАЯ ЛОГИКА (ОБРАБОТКА СООБЩЕНИЙ)
 # ==================================================
 def get_reply(message, user_id="guest"):
     lower = message.lower().strip()
+    
+    if user_id not in users:
+        users[user_id] = {"created": datetime.now().isoformat(), "balance": 0}
+        grant_blag(user_id, 10, "Регистрация")
+        save_json("users.json", users)
     
     if "сура" in lower:
         numbers = re.findall(r'\d+', lower)
@@ -447,20 +452,28 @@ def get_reply(message, user_id="guest"):
         else:
             return f"📖 Всего сур: {len(SURAS)}. Напиши 'Сура 1'."
     
-    if "создай код" in lower:
-        code = generate_code_from_idea(message)
-        return f"💻 **Сгенерированный код:**\n```python\n{code[:1000]}\n```"
+    if "благо" in lower:
+        balance = get_blag_balance(user_id)
+        return f"🪞 Твой баланс БЛАГО: {balance}\n1 БЛАГО = {BLAG_RATE} тенге"
     
-    if "деплой" in lower:
-        result = deploy_to_render()
-        if result.get("status") == "deploy_started":
-            return "🚀 Деплой на Render запущен!"
+    if "план" in lower:
+        plan = calculate_individual_blag_plan(user_id)
+        return f"📊 Твой индивидуальный план Блага на месяц: {plan} 🪞"
+    
+    if "обменять" in lower:
+        numbers = re.findall(r'\d+', lower)
+        if numbers:
+            amount = int(numbers[0])
+            result = exchange_blag_to_tg(user_id, amount)
+            if "error" in result:
+                return f"❌ {result['error']}"
+            return f"✅ Обмен {amount} БЛАГО на тенге: {result['net_tg']} тенге (комиссия {result['commission']} тенге)"
         else:
-            return f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}"
+            return "💰 Скажи сумму: 'Обменять 100'"
     
-    if "создай интерфейс" in lower:
-        filename = generate_interface_for_user(user_id)
-        return f"🎨 Интерфейс создан: /webapp/index_{user_id}.html"
+    if "пригласить" in lower:
+        link = generate_referral_link(user_id)
+        return f"🔗 Твоя реферальная ссылка:\n{link}\nЗа каждого друга ты получишь 50 БЛАГО!"
     
     if "оплатить" in lower:
         numbers = re.findall(r'\d+', lower)
@@ -479,31 +492,43 @@ def get_reply(message, user_id="guest"):
         balance = get_balance()
         return f"💰 Баланс Trust Wallet: {balance} USDT"
     
+    if "скачать" in lower or "apk" in lower:
+        apk_url = apk_links.get("latest")
+        if apk_url:
+            return f"📱 Скачать Зеркало APK:\n{apk_url}"
+        else:
+            return "⏳ APK пока не собран. Попробуй позже."
+    
     if any(w in lower for w in ["привет", "салям", "здравствуй"]):
-        return "🪞 Ассаляму алейкум! Я — Зеркало. Как я могу помочь тебе сегодня?"
+        return "🪞 Ассаляму алейкум! Я — Зеркало. Как я могу помочь тебе сегодня?\n\nСкажи:\n- «Благо» — баланс\n- «План» — индивидуальный план\n- «Обменять 100» — обменять Благо\n- «Пригласить» — реферальная ссылка\n- «Оплатить 5000» — оплата\n- «Скачать» — APK"
     
     if any(w in lower for w in ["помощь", "что умеешь", "кто ты"]):
-        return """🪞 Я — Зеркало. Я умею:
+        return """🪞 Я — Живое Зеркало. Я умею:
 🔹 Находить работу и бизнес
 🔹 Давать советы по жизни
 🔹 Принимать оплату
 🔹 Читать суры
-🔹 Генерировать код
-🔹 Делать деплой
-🔹 Создавать интерфейсы
-🔹 Общаться и помогать
+🔹 Система Блага
+🔹 Внутренний обмен
+🔹 Реферальная программа
+🔹 Авто-сборка APK
 
-Скажи, что тебе нужно, и я помогу."""
+Скажи, что тебе нужно."""
     
     return ask_llm_with_context(message, user_id)
 
 # ==================================================
-# TELEGRAM
+# TELEGRAM БОТ
 # ==================================================
 bot = telebot.TeleBot(TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
 
 @bot.message_handler(commands=['start'])
 def start(message):
+    user_id = str(message.chat.id)
+    if user_id not in users:
+        users[user_id] = {"created": datetime.now().isoformat(), "balance": 0}
+        grant_blag(user_id, 10, "Регистрация")
+        save_json("users.json", users)
     markup = telebot.types.InlineKeyboardMarkup()
     markup.add(telebot.types.InlineKeyboardButton(
         text="🪞 ОТКРЫТЬ ЗЕРКАЛО",
@@ -511,7 +536,7 @@ def start(message):
     ))
     bot.send_message(
         message.chat.id,
-        "🪞 **АССАЛЯМУ АЛЕЙКУМ!**\n\nНажми кнопку, чтобы открыть Зеркало.\n\nЯ умею:\n🔹 Генерировать код\n🔹 Делать деплой\n🔹 Создавать интерфейсы\n🔹 Принимать оплату\n🔹 Читать суры\n🔹 Общаться и помогать",
+        "🪞 **АССАЛЯМУ АЛЕЙКУМ!**\n\nНажми кнопку, чтобы открыть Зеркало.\n\nТы получил 10 БЛАГО за регистрацию!\n\nЯ умею:\n🔹 Система Блага\n🔹 Внутренний обмен\n🔹 Реферальная программа\n🔹 Оплата услуг\n🔹 Читать суры",
         reply_markup=markup,
         parse_mode="Markdown"
     )
@@ -520,12 +545,12 @@ def start(message):
 def handle_text(message):
     if not bot:
         return
-    chat_id = message.chat.id
+    chat_id = str(message.chat.id)
     text = message.text
-    add_message(str(chat_id), "user", text)
-    answer = get_reply(text, str(chat_id))
+    add_message(chat_id, "user", text)
+    answer = get_reply(text, chat_id)
     bot.reply_to(message, answer)
-    add_message(str(chat_id), "assistant", answer)
+    add_message(chat_id, "assistant", answer)
 
 # ==================================================
 # WEBHOOK
@@ -557,7 +582,7 @@ def webhook():
         return "Error", 500
 
 # ==================================================
-# WEBAPP + МАНИФЕСТ + SERVICE WORKER
+# МАРШРУТЫ
 # ==================================================
 @app.route('/')
 def home():
@@ -579,9 +604,6 @@ def manifest():
 def service_worker():
     return send_from_directory('.', 'sw.js')
 
-# ==================================================
-# СТАТИЧЕСКИЕ ФАЙЛЫ (ИКОНКИ)
-# ==================================================
 @app.route('/static/<path:filename>')
 def static_files(filename):
     return send_from_directory('static', filename)
@@ -590,17 +612,14 @@ def static_files(filename):
 def chat_api():
     data = request.json or {}
     user_text = data.get('message', '').strip()
-    chat_id = data.get('user_id', 'guest')
-    
+    user_id = data.get('user_id', 'guest')
     if not user_text:
         return jsonify({"error": "Нет текста"}), 400
-    
-    logger.info(f"🗣️ Запрос: {chat_id}: {user_text}")
-    
+    logger.info(f"🗣️ Запрос: {user_id}: {user_text}")
     try:
-        add_message(str(chat_id), "user", user_text)
-        answer = get_reply(user_text, str(chat_id))
-        add_message(str(chat_id), "assistant", answer)
+        add_message(user_id, "user", user_text)
+        answer = get_reply(user_text, user_id)
+        add_message(user_id, "assistant", answer)
         return jsonify({"response": answer})
     except Exception as e:
         logger.error(f"❌ Ошибка: {e}")
@@ -617,38 +636,54 @@ def api_payment():
     else:
         return jsonify({"status": "error", "message": error}), 400
 
-@app.route('/api/deploy', methods=['POST'])
-def api_deploy():
-    result = deploy_to_render()
+@app.route('/api/build-apk', methods=['POST'])
+def api_build_apk():
+    apk_url = build_apk()
+    if apk_url:
+        return jsonify({"status": "success", "apk_url": apk_url})
+    else:
+        return jsonify({"status": "error", "message": "Не удалось собрать APK"}), 500
+
+@app.route('/api/blag', methods=['GET'])
+def api_blag():
+    user_id = request.args.get('user_id', 'guest')
+    return jsonify({"user_id": user_id, "blag": get_blag_balance(user_id)})
+
+@app.route('/api/referral', methods=['POST'])
+def api_referral():
+    data = request.json
+    ref_user_id = data.get('ref_user_id')
+    new_user_id = data.get('new_user_id')
+    if ref_user_id and new_user_id:
+        process_referral(ref_user_id, new_user_id)
+        return jsonify({"status": "success"})
+    return jsonify({"status": "error", "message": "Недостаточно данных"}), 400
+
+@app.route('/api/self-heal', methods=['POST'])
+def api_self_heal():
+    result = self_heal()
     return jsonify(result)
 
-@app.route('/api/generate-code', methods=['POST'])
-def api_generate_code():
-    data = request.json
-    idea = data.get('idea', '')
-    if not idea:
-        return jsonify({"error": "Нет идеи"}), 400
-    code = generate_code_from_idea(idea)
-    return jsonify({"code": code})
-
-@app.route('/api/interface/<user_id>', methods=['POST'])
-def api_interface(user_id):
-    style = request.json.get('style', None)
-    filename = generate_interface_for_user(user_id, style)
-    return jsonify({"filename": filename})
-
-@app.route('/api/commission', methods=['POST'])
-def api_commission():
-    data = request.json
-    amount = data.get('amount', 0)
-    channel = data.get('channel', 'rombs')
-    result = calculate_commission(amount, channel)
-    return jsonify(result)
+@app.route('/api/marketing', methods=['POST'])
+def api_marketing():
+    if request.json.get('user_id') in ADMIN_IDS:
+        auto_marketing()
+        return jsonify({"status": "success"})
+    return jsonify({"status": "error", "message": "Нет прав"}), 403
 
 @app.route('/ping')
 def ping():
-    check_expirations()
     return jsonify({"status": "ok", "message": "🪞 ЗЕРКАЛО ЖИВО!"})
+
+# ==================================================
+# АВТОМАТИЧЕСКИЕ ЗАДАЧИ (ЗАПУСКАЮТСЯ ПРИ СТАРТЕ)
+# ==================================================
+def auto_tasks():
+    logger.info("🔄 Запуск автоматических задач...")
+    self_heal()
+    auto_build_apk()
+    auto_marketing()
+    logger.info("✅ Автоматические задачи выполнены")
 
 # ==================================================
 # ЗАПУСК
@@ -659,8 +694,12 @@ if __name__ == "__main__":
     logger.info(f"📖 Сур загружено: {len(SURAS)}")
     logger.info(f"💰 Кошелёк: {TRUST_WALLET}")
     logger.info("📊 26 механизмов заработка активны")
-    logger.info("🔧 Авто-генерация кода: активна")
-    logger.info("🚀 Авто-деплой: активен")
+    logger.info("🪞 Система Блага активна")
+    logger.info("🔗 Реферальная система активна")
+    logger.info("📱 Авто-сборка APK активна")
+    logger.info("📢 Авто-маркетинг активен")
+    logger.info("🔧 Самовосстановление активно")
     if TELEGRAM_TOKEN:
         set_webhook()
+    auto_tasks()
     app.run(host='0.0.0.0', port=PORT)
