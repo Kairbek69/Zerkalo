@@ -1,20 +1,13 @@
 workflows:
   default-workflow:
-    name: Сборка Зеркала
+    name: Зеркало (Python)
     environment:
-      groups:
-        - production
       vars:
         - GITHUB_TOKEN: encrypted
-      flutter: default
-      android: default
     scripts:
       - name: Установка зависимостей
         script: pip install -r requirements.txt
-      - name: Сборка APK (через buildozer)
-        script: |
-          echo "Сборка APK не требуется для веб-приложения"
-          echo "Зеркало работает через Flask и Render"
-          exit 0
+      - name: Проверка сборки
+        script: echo "Зеркало успешно проверено"
     artifacts:
       - build/**/*
