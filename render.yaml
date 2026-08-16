@@ -1,13 +1,48 @@
 services:
   - type: web
-    name: zerkalo
-    runtime: python
+    name: zerkalo-server
+    env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python app.py
+    startCommand: gunicorn -w 4 -k uvicorn.workers.UvicornWorker app:app
     envVars:
-      - key: BOT_TOKEN
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: RENDER_API_KEY
+        sync: false
+      - key: SECRET_KEY
         sync: false
       - key: TRUST_WALLET
         sync: false
-      - key: GIS_API_KEY
+      - key: FOUNDER_ID
         sync: false
+      - key: HEIR_ID
+        sync: false
+
+  - type: web
+    name: zerkalo-bot
+    env: python
+    buildCommand: pip install -r bot-requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: FOUNDER_ID
+        sync: false
+      - key: HEIR_ID
+        sync: false
+
+  - type: web
+    name: zerkalo-cdn
+    env: static
+    buildCommand: ""
+    publishDir: ./client
