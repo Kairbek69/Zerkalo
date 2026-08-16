@@ -1,9 +1,1 @@
-flask
-flask-cors
-redis
-groq
-google-generativeai
-edge-tts
-gunicorn
-uvicorn
-requests
+flask flask-cors redis groq google-generativeai edge-tts gunicorn uvicorn requests pyTelegramBotAPI
