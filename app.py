@@ -4,13 +4,13 @@ import base64
 import asyncio
 import threading
 import subprocess
+import sqlite3
+from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-# Импорт модулей
+# --- Импорт ИИ и памяти ---
 import redis
-import sqlite3
-from groq import Groq
 import google.generativeai as genai
 import edge_tts
 import requests
@@ -18,7 +18,7 @@ import requests
 app = Flask(__name__)
 CORS(app)
 
-# --- Конфигурация ---
+# --- КОНФИГУРАЦИЯ ИЗ ОКРУЖЕНИЯ ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 FOUNDER_ID = os.getenv("FOUNDER_ID")
 HEIR_ID = os.getenv("HEIR_ID")
@@ -31,28 +31,44 @@ RENDER_API_KEY = os.getenv("RENDER_API_KEY")
 TRUST_WALLET = os.getenv("TRUST_WALLET")
 SECRET_KEY = os.getenv("SECRET_KEY")
 
-# Подключение к Redis
-r = redis.Redis.from_url(REDIS_URL)
+# --- ПОДКЛЮЧЕНИЕ К БАЗАМ ДАННЫХ ---
+# 1. Redis (быстрая память для текущих сессий)
+try:
+    r = redis.Redis.from_url(REDIS_URL)
+    r.ping()
+    print("🟢 Redis подключён")
+except Exception as e:
+    print(f"🔴 Redis недоступен: {e}")
+    r = None
 
-# Подключение к SQLite
+# 2. SQLite (долговременная память для логов)
 conn = sqlite3.connect('zerkalo.db', check_same_thread=False)
 c = conn.cursor()
-c.execute("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, action TEXT, details TEXT, timestamp TEXT)")
+c.execute("""
+CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT,
+    action TEXT,
+    details TEXT,
+    timestamp TEXT
+)
+""")
+conn.commit()
 
-# Подключение к Gemini
+# --- ПОДКЛЮЧЕНИЕ К ИИ ---
+# Gemini для зрения
 genai.configure(api_key=GEMINI_API_KEY)
-vision_model = genai.GenerativeModel('gemini-1.5-pro')
+vision_model = genai.GenerativeModel('gemini-1.5-flash')
 
-# Подключение к Groq
-groq_client = Groq(api_key=GROQ_API_KEY)
-
-# --- Функции ---
+# --- ФУНКЦИЯ ЛОГИРОВАНИЯ ---
 def log_action(user_id, action, details=""):
-    import datetime
+    timestamp = datetime.now().isoformat()
     c.execute("INSERT INTO logs (user_id, action, details, timestamp) VALUES (?, ?, ?, ?)",
-              (user_id, action, details, datetime.datetime.now().isoformat()))
+              (user_id, action, details, timestamp))
     conn.commit()
+    print(f"📝 Лог: {user_id} | {action} | {details}")
 
+# --- ОСНОВНОЙ ЭНДПОИНТ: АНАЛИЗ КАДРА ---
 @app.route('/analyze', methods=['POST'])
 def analyze():
     try:
@@ -60,53 +76,86 @@ def analyze():
         if data.get("type") != "frame":
             return jsonify({"error": "Invalid type"}), 400
 
+        # Декодирование кадра
         image_data = data["data"].split(",")[1]
         image_bytes = base64.b64decode(image_data)
 
-        # Анализ через Gemini Vision
+        # Логируем действие
+        user_id = data.get("user_id", "guest")
+        log_action(user_id, "frame_analysis", f"Размер кадра: {len(image_bytes)} байт")
+
+        # Отправка в Gemini Vision
+        prompt = """
+        Ты — Зеркало. Ты смотришь на экран человека.
+        Определи:
+        1. Что за приложение открыто?
+        2. Какой элемент сейчас в фокусе (кнопка, поле ввода, меню)?
+        3. Дай короткую, полезную голосовую подсказку (одно предложение).
+        Ответь строго в JSON формате:
+        {"app": "...", "element": "...", "hint": "..."}
+        """
+
         response = vision_model.generate_content([
-            "Ты — Зеркало. Ты видишь экран человека. Определи, какое приложение открыто, какой элемент активен (кнопка, поле ввода), и дай короткую голосовую подсказку. Не используй сложные термины. Ответь строго JSON: {'app': '...', 'element': '...', 'hint': '...'}",
+            prompt,
             {"mime_type": "image/jpeg", "data": image_bytes}
         ])
 
         result_text = response.text.strip()
+        # Очистка от лишних символов
         result_text = result_text.replace("```json", "").replace("```", "").strip()
 
         try:
             result = json.loads(result_text)
         except:
-            result = {"app": "Неизвестно", "element": "Неизвестно", "hint": "Повторите действие"}
+            result = {"app": "Неизвестно", "element": "Неизвестно", "hint": "Пожалуйста, повторите действие."}
 
-        # Генерация голоса через Edge-TTS
-        tts = edge_tts.Communicate(result.get("hint", "Подсказка"), voice="ru-RU-SvetlanaNeural")
-        audio_file = "audio_output.mp3"
-        asyncio.run(tts.save(audio_file))
+        # --- Генерация голоса (Edge-TTS) ---
+        hint = result.get("hint", "Подсказка")
+        audio_file = f"audio_{datetime.now().timestamp()}.mp3"
+        
+        # Асинхронная генерация голоса
+        async def generate_audio():
+            tts = edge_tts.Communicate(hint, voice="ru-RU-SvetlanaNeural")
+            await tts.save(audio_file)
 
-        return jsonify({
+        try:
+            asyncio.run(generate_audio())
+        except:
+            audio_file = None
+
+        # Формируем ответ
+        response_data = {
             "type": "instruction",
-            "data": result,
-            "audio_url": "https://zerkalo.onrender.com/audio_output.mp3"
-        })
+            "data": {
+                "app": result.get("app", "Неизвестно"),
+                "element": result.get("element", "Неизвестно"),
+                "hint": hint
+            },
+            "audio_url": f"/static/{audio_file}" if audio_file else None
+        }
+
+        # Если есть Redis — сохраняем сессию
+        if r:
+            r.setex(f"session:{user_id}", 3600, json.dumps(response_data))
+
+        return jsonify(response_data)
 
     except Exception as e:
-        print(f"Error: {e}")
-        return jsonify({"error": "Internal server error"}), 500
+        print(f"❌ Ошибка анализа: {e}")
+        return jsonify({"error": "Внутренняя ошибка сервера"}), 500
 
+# --- СТАТУС СИСТЕМЫ ---
 @app.route('/status', methods=['GET'])
 def status():
-    return jsonify({"status": "running", "version": "2.0", "mode": "Комфорт по жизни!"})
+    return jsonify({
+        "status": "running",
+        "version": "2.0",
+        "mode": "С Комфортом По Жизни!",
+        "memory": "Redis/SQLite",
+        "vision": "Gemini 1.5 Flash"
+    })
 
-@app.route('/deploy', methods=['POST'])
-def auto_deploy():
-    try:
-        subprocess.run(["git", "add", "."], check=True)
-        subprocess.run(["git", "commit", "-m", "Авто-обновление от Зеркала"], check=True)
-        subprocess.run(["git", "push"], check=True)
-        return jsonify({"status": "deployed"})
-    except:
-        return jsonify({"status": "error"}), 500
-
-# --- Запуск ---
+# --- ЗАПУСК ---
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
