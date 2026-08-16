@@ -1,1 +1,10 @@
-flask flask-cors redis groq google-generativeai edge-tts gunicorn uvicorn requests pyTelegramBotAPI
+flask
+flask-cors
+redis
+groq
+google-generativeai
+edge-tts
+gunicorn
+uvicorn
+requests
+pyTelegramBotAPI
