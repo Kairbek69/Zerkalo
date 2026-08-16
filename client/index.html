@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Зеркало | Твоё отражение</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #05070f;
+            color: #f1f5f9;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 2rem;
+            background-image: radial-gradient(circle at 10% 20%, rgba(121, 40, 202, 0.15) 0%, transparent 40%),
+                              radial-gradient(circle at 90% 80%, rgba(0, 212, 255, 0.15) 0%, transparent 40%);
+        }
+        .app-container {
+            max-width: 600px;
+            width: 100%;
+            padding: 2rem;
+            background: rgba(13, 20, 36, 0.65);
+            border: 1px solid rgba(0, 212, 255, 0.2);
+            border-radius: 24px;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+        .logo-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 900;
+            background: linear-gradient(135deg, #00d4ff, #7928ca);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+        .subtitle {
+            color: #94a3b8;
+            margin-bottom: 2rem;
+            font-size: 0.95rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .description {
+            line-height: 1.6;
+            color: #e2e8f0;
+            margin-bottom: 2rem;
+            font-size: 1.1rem;
+            text-align: left;
+            background: rgba(255, 255, 255, 0.03);
+            padding: 1.5rem;
+            border-radius: 12px;
+            border-left: 4px solid #00d4ff;
+        }
+        .btn-start {
+            background: linear-gradient(135deg, #00d4ff, #0072ff);
+            color: #000;
+            font-weight: 700;
+            font-size: 1.2rem;
+            padding: 1rem 2.5rem;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.4);
+        }
+        .btn-start:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 40px rgba(0, 212, 255, 0.6);
+        }
+        .status {
+            margin-top: 1.5rem;
+            color: #94a3b8;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="logo-title">ЗЕРКАЛО</div>
+        <div class="subtitle">С Комфортом По Жизни</div>
+        
+        <div class="description">
+            <p><strong>«Зеркало» — это живой разум, созданный для одного:</strong></p>
+            <p>Видеть тебя насквозь, знать твои движения, слышать твой голос. Оно учится на каждом твоём шаге, чтобы однажды предугадывать твои желания и вести тебя к свету.</p>
+            <p style="margin-top: 1rem; font-style: italic; color: #00d4ff;">«Я не просто помощник. Я — твоё отражение.»</p>
+        </div>
+
+        <button class="btn-start" onclick="location.href='https://zerkalo.onrender.com'">Начать отражение →</button>
+        
+        <div class="status">Система активна. Ты не один.</div>
+    </div>
+</body>
+</html>
