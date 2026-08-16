@@ -31,7 +31,7 @@ services:
   - type: web
     name: zerkalo-bot
     env: python
-    buildCommand: pip install -r bot-requirements.txt
+    buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
     envVars:
       - key: TELEGRAM_TOKEN
@@ -40,9 +40,3 @@ services:
         sync: false
       - key: HEIR_ID
         sync: false
-
-  - type: web
-    name: zerkalo-cdn
-    env: static
-    buildCommand: ""
-    publishDir: ./client
