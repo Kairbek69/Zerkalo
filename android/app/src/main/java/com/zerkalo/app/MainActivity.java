@@ -1,5 +1,6 @@
 package com.zerkalo.app;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
@@ -7,7 +8,6 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -31,7 +31,6 @@ public class MainActivity extends AppCompatActivity {
     private TextToSpeech tts;
     private OkHttpClient client;
 
-    // ⚠️ ЗАМЕНИ НА СВОЙ URL RENDER
     private static final String API_URL = "https://zerkalo-6sla.onrender.com";
 
     @Override
