@@ -106,7 +106,7 @@ public class MainActivity extends AppCompatActivity {
         client.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                runOnUiThread(() -> tvResponse.setText("Ошибка: " + e.getMessage()));
+                runOnUiThread(() -> tvResponse.setText("Ошибка сети: " + e.getMessage()));
             }
 
             @Override
